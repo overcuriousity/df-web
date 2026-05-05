@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -18,7 +20,20 @@ func main() {
 	}
 
 	mgr := newManager(cfg, store)
+	mgr.reconcile()
 	go mgr.idleReaper()
+
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGHUP)
+		for range ch {
+			if err := store.reload(); err != nil {
+				log.Printf("reload users: %v", err)
+			} else {
+				log.Printf("users.yml reloaded")
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 

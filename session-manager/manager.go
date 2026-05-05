@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,7 +16,8 @@ type containerInfo struct {
 	id       string
 	uid      string
 	mode     string // "sdl" or "text"
-	port     int
+	host     string // container hostname on df_internal, e.g. "df-alice"
+	port     int    // internal port (websockify, typically 6080)
 	lastSeen time.Time
 }
 
@@ -44,14 +46,25 @@ func newManager(cfg *Config, store *UserStore) *Manager {
 // requireAuth is middleware that checks for a valid session cookie.
 func (m *Manager) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isWS := r.Header.Get("Upgrade") == "websocket"
 		uid, err := m.sessionUID(r)
 		if err != nil {
-			http.Redirect(w, r, "/?reason=auth", http.StatusFound)
+			log.Printf("requireAuth: rejected %s %s from %s: %v", r.Method, r.URL.Path, r.RemoteAddr, err)
+			if isWS {
+				http.Error(w, "session required", http.StatusUnauthorized)
+			} else {
+				http.Redirect(w, r, "/?reason=auth", http.StatusFound)
+			}
 			return
 		}
 		if _, ok := m.store.ByUID(uid); !ok {
+			log.Printf("requireAuth: unknown uid=%s from %s", uid, r.RemoteAddr)
 			m.clearSession(w)
-			http.Redirect(w, r, "/?reason=unknown_user", http.StatusFound)
+			if isWS {
+				http.Error(w, "unknown user", http.StatusForbidden)
+			} else {
+				http.Redirect(w, r, "/?reason=unknown_user", http.StatusFound)
+			}
 			return
 		}
 		// Attach uid to the request context via a simple header trick (this is
@@ -136,8 +149,8 @@ func (m *Manager) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Proxy the websocket to the container's port.
-	proxyWebsocket(w, r, ci.port, func() {
+	// Proxy the websocket to the container's port via df_internal.
+	proxyWebsocket(w, r, ci.host, ci.port, func() {
 		m.mu.Lock()
 		if c, ok := m.containers[uid]; ok && c.id == ci.id {
 			c.lastSeen = time.Now()
@@ -162,23 +175,58 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	}
 
 	image := m.cfg.ImageSDL
-	port := 6080
+	const vncPort = 6080
 
-	hostPort, id, err := dockerRun(m.cfg, uid, image, port)
+	id, err := dockerRun(m.cfg, uid, image)
 	if err != nil {
+		log.Printf("dockerRun failed for user %s: %v", uid, err)
 		return nil, err
 	}
 
+	containerName := fmt.Sprintf("df-%s", uid)
 	ci := &containerInfo{
 		id:       id,
 		uid:      uid,
 		mode:     mode,
-		port:     hostPort,
+		host:     containerName,
+		port:     vncPort,
 		lastSeen: time.Now(),
 	}
 	m.containers[uid] = ci
-	log.Printf("started container %s for user %s (mode=%s port=%d)", id[:12], uid, mode, hostPort)
+	log.Printf("started container %s for user %s (mode=%s addr=%s:%d)", id[:12], uid, mode, containerName, vncPort)
 	return ci, nil
+}
+
+// reconcile adopts running df-* containers from a previous session-manager
+// instance into m.containers, and removes any stopped orphans. Call once at startup.
+func (m *Manager) reconcile() {
+	running, err := dockerListRunning()
+	if err != nil {
+		log.Printf("reconcile: list containers: %v", err)
+		return
+	}
+	const vncPort = 6080
+	m.mu.Lock()
+	for _, c := range running {
+		if !strings.HasPrefix(c.name, "df-") {
+			continue
+		}
+		uid := strings.TrimPrefix(c.name, "df-")
+		if uid == "" {
+			continue
+		}
+		m.containers[uid] = &containerInfo{
+			id:       c.id,
+			uid:      uid,
+			mode:     "sdl",
+			host:     c.name,
+			port:     vncPort,
+			lastSeen: time.Now(),
+		}
+		log.Printf("reconcile: adopted container %s for user %s", c.id[:12], uid)
+	}
+	m.mu.Unlock()
+	dockerRemoveExited()
 }
 
 // idleReaper periodically stops containers that have been idle too long.

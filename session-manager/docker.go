@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -24,8 +23,9 @@ func containerRuntime() string {
 	return "docker"
 }
 
-// dockerRun starts a DF container for the given user and returns the allocated host port and container ID.
-func dockerRun(cfg *Config, uid, image string, containerPort int) (hostPort int, id string, err error) {
+// dockerRun starts a DF container for the given user and returns the container ID.
+// The container is reachable at df-<uid>:<containerPort> on cfg.Network.
+func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 	saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
 
 	args := []string{
@@ -41,30 +41,14 @@ func dockerRun(cfg *Config, uid, image string, containerPort int) (hostPort int,
 		// the per-user bind-mount for saves.
 		"--tmpfs", "/tmp:size=64m",
 		"--mount", fmt.Sprintf("type=bind,source=%s,target=/save", saveDir),
-		"-P", // publish exposed port to a random host port
 		image,
 	}
 
 	out, err := runDocker(args...)
 	if err != nil {
-		return 0, "", fmt.Errorf("docker run: %w", err)
+		return "", fmt.Errorf("docker run: %w", err)
 	}
-	id = strings.TrimSpace(out)
-
-	// Resolve the host port assigned.
-	portOut, err := runDocker("port", id, strconv.Itoa(containerPort))
-	if err != nil {
-		_ = runDockerNoOut("rm", "-f", id)
-		return 0, "", fmt.Errorf("docker port: %w", err)
-	}
-	// Output: 0.0.0.0:XXXXX or [::]:XXXXX
-	parts := strings.Split(strings.TrimSpace(portOut), ":")
-	p, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil {
-		_ = runDockerNoOut("rm", "-f", id)
-		return 0, "", fmt.Errorf("parse port %q: %w", portOut, err)
-	}
-	return p, id, nil
+	return strings.TrimSpace(out), nil
 }
 
 // dockerStop sends SIGTERM to the container (triggers the quit-save script) then removes it.
@@ -91,4 +75,37 @@ func runDocker(args ...string) (string, error) {
 func runDockerNoOut(args ...string) error {
 	_, err := runDocker(args...)
 	return err
+}
+
+// dockerListRunning returns the ID and name of every running container whose
+// name starts with "df-".
+func dockerListRunning() ([]struct{ id, name string }, error) {
+	out, err := runDocker("ps", "--filter", "name=df-", "--format", "{{.ID}}\t{{.Names}}")
+	if err != nil {
+		return nil, err
+	}
+	var result []struct{ id, name string }
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			result = append(result, struct{ id, name string }{parts[0], parts[1]})
+		}
+	}
+	return result, nil
+}
+
+// dockerRemoveExited removes all exited df-* containers.
+func dockerRemoveExited() {
+	out, err := runDocker("ps", "-a", "--filter", "name=df-", "--filter", "status=exited", "--format", "{{.ID}}")
+	if err != nil {
+		return
+	}
+	for _, id := range strings.Split(strings.TrimSpace(out), "\n") {
+		if id != "" {
+			_ = runDockerNoOut("rm", "-f", id)
+		}
+	}
 }
