@@ -48,7 +48,7 @@ func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 		// Security boundary is the container itself, network isolation, and
 		// the per-user bind-mount for saves.
 		"--tmpfs", "/tmp:size=64m",
-		"--mount", fmt.Sprintf("type=bind,source=%s,target=/save", saveDir),
+		"--mount", fmt.Sprintf("type=bind,source=%s,target=/opt/df/data/save", saveDir),
 		image,
 	}
 
