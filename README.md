@@ -166,7 +166,7 @@ Each game container:
 - Is started on demand, stopped after `idle_timeout` of inactivity
 - Has its own bind-mounted save directory (`/srv/df/users/<uid>/save/`)
 - Is attached only to the internal Docker network (no internet egress)
-- Is limited to 1 CPU / 1 GB RAM / 256 PIDs
+- Is limited to 1 CPU / 4 GB RAM / 256 PIDs (DF worldgen on medium worlds can spike past 2 GB)
 
 ## Development
 
