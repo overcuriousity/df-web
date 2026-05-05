@@ -1,7 +1,15 @@
 #!/bin/sh
-mkdir -p /tmp/pulse
+# PulseAudio queries D-Bus which requires a machine-id and cookie dir.
+# Generate these at runtime — no D-Bus daemon needed, just the files.
+mkdir -p /tmp/pulse /var/lib/dbus /root/.config/pulse
+if [ ! -f /etc/machine-id ]; then
+    tr -dc 'a-f0-9' </dev/urandom | head -c 32 > /etc/machine-id
+fi
+[ -f /var/lib/dbus/machine-id ] || cp /etc/machine-id /var/lib/dbus/machine-id
+
 exec pulseaudio \
     --daemonize=no \
+    --exit-idle-time=-1 \
     --log-target=stderr \
     -n \
     -L "module-null-sink sink_name=null_out sink_properties=device.description=VirtualSink" \
