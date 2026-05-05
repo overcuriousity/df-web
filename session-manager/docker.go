@@ -27,10 +27,18 @@ func containerRuntime() string {
 // The container is reachable at df-<uid>:<containerPort> on cfg.Network.
 func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 	saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
+	name := fmt.Sprintf("df-%s", uid)
+
+	// Remove any stopped container holding this name (e.g. one the s6 finish
+	// script just took down after a DF crash). Docker reserves the name even
+	// for exited containers, so without this we'd hit a name-conflict on the
+	// very next /play. Errors are ignored: "no such container" is the common
+	// case and not fatal.
+	_ = runDockerNoOut("rm", "-f", name)
 
 	args := []string{
 		"run", "-d",
-		"--name", fmt.Sprintf("df-%s", uid),
+		"--name", name,
 		"--network", cfg.Network,
 		"--cpus", "1.0",
 		"--memory", "4g",
