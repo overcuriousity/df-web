@@ -19,4 +19,10 @@ trap _quit TERM
 
 ./dwarfort &
 DF_PID=$!
+
+# Without a window manager, DF's SDL2 window never receives X11 input focus,
+# so all keyboard and mouse button events from the VNC server are lost.
+# Wait for the window to appear and give it focus explicitly.
+xdotool search --sync --name "Dwarf Fortress" windowfocus &
+
 wait "$DF_PID"

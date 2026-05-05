@@ -9,4 +9,5 @@ exec x11vnc \
     -rfbport 5900 \
     -noxdamage \
     -noipv6 \
+    -xkb \
     -quiet 2>&1

@@ -37,8 +37,5 @@ RUN sed -i 's/^\[WINDOWED:.*\]/[WINDOWED:YES]/' /opt/df/data/init/init_default.t
 # Set seasonal autosave in d_init_default.txt.
 RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/' /opt/df/data/init/d_init_default.txt
 
-# Apply keyboard interface overrides (empty by default; customise and rebuild to add binds).
-COPY interface.txt /opt/df/data/init/interface.txt
-
 VOLUME ["/save"]
 WORKDIR /opt/df
