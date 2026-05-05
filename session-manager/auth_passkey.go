@@ -94,7 +94,17 @@ func (m *Manager) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request, w
 		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
-	options, session, err := wa.BeginRegistration(&dfUser{user})
+	// Require a resident (discoverable) credential. Login uses
+	// BeginDiscoverableLogin, which only finds credentials the authenticator
+	// stores locally — a YubiKey enrolled without this flag would succeed at
+	// registration but be unusable for login.
+	requireResident := true
+	sel := protocol.AuthenticatorSelection{
+		RequireResidentKey: &requireResident,
+		ResidentKey:        protocol.ResidentKeyRequirementRequired,
+		UserVerification:   protocol.VerificationPreferred,
+	}
+	options, session, err := wa.BeginRegistration(&dfUser{user}, webauthn.WithAuthenticatorSelection(sel))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
