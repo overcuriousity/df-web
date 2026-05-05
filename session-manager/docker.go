@@ -97,6 +97,16 @@ func dockerListRunning() ([]struct{ id, name string }, error) {
 	return result, nil
 }
 
+// dockerIsRunning reports whether the container with the given ID is currently
+// running. Returns false (no error) for unknown or stopped containers.
+func dockerIsRunning(id string) bool {
+	out, err := runDocker("inspect", "--format", "{{.State.Running}}", id)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) == "true"
+}
+
 // dockerRemoveExited removes all exited df-* containers.
 func dockerRemoveExited() {
 	out, err := runDocker("ps", "-a", "--filter", "name=df-", "--filter", "status=exited", "--format", "{{.ID}}")

@@ -182,8 +182,14 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	defer m.mu.Unlock()
 
 	if ci, ok := m.containers[uid]; ok {
-		ci.lastSeen = time.Now()
-		return ci, nil
+		if dockerIsRunning(ci.id) {
+			ci.lastSeen = time.Now()
+			return ci, nil
+		}
+		// Cached container has died (DF crash, OOM, manual docker rm, …).
+		// Drop the stale entry and fall through to spawn a fresh one.
+		log.Printf("ensureContainer: stale entry for user %s (container %s no longer running) — respawning", uid, ci.id[:12])
+		delete(m.containers, uid)
 	}
 
 	// Enforce concurrency cap.
@@ -230,6 +236,12 @@ func (m *Manager) reconcile() {
 		}
 		uid := strings.TrimPrefix(c.name, "df-")
 		if uid == "" {
+			continue
+		}
+		// Docker's name filter is a substring match, so containers like
+		// "df-web-session-manager-1" leak through. Only adopt names that
+		// correspond to a known user.
+		if _, ok := m.store.ByUID(uid); !ok {
 			continue
 		}
 		m.containers[uid] = &containerInfo{
