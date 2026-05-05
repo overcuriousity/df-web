@@ -1,0 +1,9 @@
+#!/bin/sh
+mkdir -p /tmp/pulse
+exec pulseaudio \
+    --daemonize=no \
+    --log-target=stderr \
+    -n \
+    -L "module-null-sink sink_name=null_out sink_properties=device.description=VirtualSink" \
+    -L "module-native-protocol-unix socket=/tmp/pulse/native auth-anonymous=1" \
+    2>&1

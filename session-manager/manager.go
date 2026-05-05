@@ -159,6 +159,23 @@ func (m *Manager) handlePlay(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handlePlayAudio proxies the audio stream from the user's running container.
+// Returns 404 if no container is active (the user must load /play first).
+func (m *Manager) handlePlayAudio(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	ci, ok := m.containers[uid]
+	m.mu.Unlock()
+
+	if !ok {
+		http.Error(w, "no active session", http.StatusNotFound)
+		return
+	}
+	const audioPort = 6081
+	proxyHTTPStream(w, r, ci.host, audioPort)
+}
+
 // ensureContainer returns an existing container for the user or starts a new one.
 func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	m.mu.Lock()

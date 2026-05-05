@@ -1,13 +1,8 @@
 # User allowlist.
 # Each entry maps one player to their auth credentials.
-# Generate a token hash with: echo -n "YOUR_RAW_TOKEN" | sha256sum
 #
-# Provision a new user:  ../scripts/provision-user.sh <uid>
-# That creates /srv/df/users/<uid>/save/ and adds a skeleton entry here.
-
-- uid: "admin"
-  display_name: "Admin"
-  token_hash: ""       # set after running: openssl rand -base64 32 | sha256sum -b | cut -d' ' -f1
-  oidc_sub: ""
-  passkeys: []
-  default_mode: "sdl"
+# Provision a new user:  ../scripts/provision-user.sh <uid> "Display Name"
+# That creates /srv/df/users/<uid>/save/, appends an entry here, and prints the access key.
+#
+# After adding users to a running deployment, reload without restarting:
+#   docker compose kill -s SIGHUP session-manager

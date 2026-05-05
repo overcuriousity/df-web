@@ -12,16 +12,24 @@
   #toolbar a:hover { color: #c8a870; }
   #fs-hint { color: #c8a870; font-size: 0.8rem; }
   #novnc-frame { flex: 1; width: 100%; border: none; }
+  #audio-btn { background: none; border: none; color: #8b7355; cursor: pointer;
+               font-family: inherit; font-size: 0.85rem; padding: 0; }
+  #audio-btn:hover { color: #c8a870; }
 </style>
 </head>
 <body>
 <div id="toolbar">
   <span>&#9935; Dwarf Fortress</span>
   <span id="fs-hint">Press F11 or click &#x26F6; for fullscreen</span>
-  <span style="margin-left:auto">
+  <span style="margin-left:auto; display:flex; gap:1rem; align-items:center">
+    <button id="audio-btn" onclick="toggleAudio()" title="Enable audio">&#128263; Audio off</button>
+    <a href="/account">Account</a>
     <a href="/auth/logout">Logout</a>
   </span>
 </div>
+<!-- Audio streamed from the container via /play/audio (WebM/Opus). -->
+<audio id="game-audio" style="display:none"></audio>
+
 <!-- noVNC served by websockify in the container, proxied through /play. -->
 <iframe id="novnc-frame"
         src="/novnc/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&path=/play&resize=scale&show_dot=false&bell=false"
@@ -45,6 +53,24 @@ async function requestKeyboardLock() {
 document.addEventListener('fullscreenchange', () => {
   if (document.fullscreenElement) requestKeyboardLock();
 });
+
+let audioEnabled = false;
+const audioEl = document.getElementById('game-audio');
+const audioBtn = document.getElementById('audio-btn');
+
+function toggleAudio() {
+  if (audioEnabled) {
+    audioEl.pause();
+    audioEl.src = '';
+    audioEnabled = false;
+    audioBtn.textContent = '\u{1F507} Audio off';
+  } else {
+    audioEl.src = '/play/audio';
+    audioEl.play().catch(() => {});
+    audioEnabled = true;
+    audioBtn.textContent = '\u{1F50A} Audio on';
+  }
+}
 
 document.getElementById('novnc-frame').addEventListener('load', () => {
   document.getElementById('fs-hint').textContent =

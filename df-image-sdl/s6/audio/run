@@ -1,0 +1,5 @@
+#!/bin/sh
+# Wait for PulseAudio socket before starting the audio stream server.
+export PULSE_SERVER=unix:/tmp/pulse/native
+until pactl info >/dev/null 2>&1; do sleep 0.2; done
+exec python3 /serve-audio.py 2>&1

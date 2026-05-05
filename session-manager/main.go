@@ -47,6 +47,7 @@ func main() {
 
 	// App routes (require session cookie)
 	mux.Handle("/play", mgr.requireAuth(http.HandlerFunc(mgr.handlePlay)))
+	mux.Handle("/play/audio", mgr.requireAuth(http.HandlerFunc(mgr.handlePlayAudio)))
 	mux.Handle("/account", mgr.requireAuth(http.HandlerFunc(mgr.handleAccount)))
 
 	// Login page is public; authenticated users are redirected to /play.

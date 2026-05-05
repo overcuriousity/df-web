@@ -2,8 +2,11 @@
 # Wait for Xvfb socket and VNC port before launching DF.
 until [ -S /tmp/.X11-unix/X0 ]; do sleep 0.2; done
 until nc -z 127.0.0.1 5900 2>/dev/null; do sleep 0.3; done
+until [ -S /tmp/pulse/native ]; do sleep 0.2; done
 
 export DISPLAY=:0
+export PULSE_SERVER=unix:/tmp/pulse/native
+export SDL_AUDIODRIVER=pulse
 cd /opt/df
 
 # On SIGTERM (sent by s6 during container shutdown) send the in-game quit-save

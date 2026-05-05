@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdotool \
     netcat-openbsd \
     s6 \
+    pulseaudio \
+    pulseaudio-utils \
+    ffmpeg \
+    python3-minimal \
     && rm -rf /var/lib/apt/lists/*
 
 # PRINT_MODE:AUTO lets SDL2 auto-select the renderer (hardware or software).
@@ -16,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # s6 service definitions.
 COPY s6/ /etc/s6/
+
+# Audio streaming helper.
+COPY serve-audio.py /serve-audio.py
 
 # Wrapper that sends DF a quit-save via xdotool when the container stops.
 COPY quit-sdl.sh /quit-sdl.sh

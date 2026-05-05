@@ -1,5 +1,3 @@
-version: "3.9"
-
 # This compose file manages the session manager only.
 # DF game containers are spawned dynamically by the session manager via the Docker socket.
 
@@ -22,5 +20,7 @@ services:
 
 networks:
   df_internal:
+    name: df_internal       # pin: avoid the compose project-name prefix so
+                            # `docker run --network df_internal` (issued by the
+                            # session-manager) attaches to the same network.
     driver: bridge
-    internal: true  # no external internet access for containers on this network

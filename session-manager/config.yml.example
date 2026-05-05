@@ -2,7 +2,7 @@
 # Copy this to config.yml and fill in secrets before running.
 
 listen: "127.0.0.1:8080"
-web_dir: "../web"
+web_dir: "/app/web"
 saves_root: "/srv/df/users"
 
 image_sdl:  "df-image-sdl"

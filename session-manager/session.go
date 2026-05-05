@@ -22,9 +22,9 @@ type sessionPayload struct {
 }
 
 func (m *Manager) setSession(w http.ResponseWriter, uid string) {
-	raw := uid + ":" + time.Now().UTC().Format(time.RFC3339)
+	raw := uid + "|" + time.Now().UTC().Format(time.RFC3339)
 	sig := m.sign(raw)
-	val := base64.RawURLEncoding.EncodeToString([]byte(raw + ":" + sig))
+	val := base64.RawURLEncoding.EncodeToString([]byte(raw + "|" + sig))
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    val,
@@ -56,13 +56,13 @@ func (m *Manager) sessionUID(r *http.Request) (string, error) {
 	if err != nil {
 		return "", errors.New("malformed cookie")
 	}
-	// Format: uid:issued:sig
-	parts := strings.SplitN(string(raw), ":", 3)
+	// Format: uid|issued|sig
+	parts := strings.SplitN(string(raw), "|", 3)
 	if len(parts) != 3 {
 		return "", errors.New("malformed cookie")
 	}
 	uid, issued, sig := parts[0], parts[1], parts[2]
-	want := m.sign(uid + ":" + issued)
+	want := m.sign(uid + "|" + issued)
 	if !hmac.Equal([]byte(sig), []byte(want)) {
 		return "", errors.New("invalid signature")
 	}

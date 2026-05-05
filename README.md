@@ -102,7 +102,16 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 ```
 
 To add a user: run `scripts/provision-user.sh <uid> "Display Name"` — it appends the entry to `users.yml` and prints the access key.
-To revoke access: remove or comment out the entry, then `docker compose restart session-manager`.
+
+To rotate a forgotten/leaked key: run `scripts/provision-user.sh --rotate <uid>` — it replaces only the `token_hash` (passkeys and `oidc_sub` are preserved) and prints a fresh key. Then reload the session manager so the new hash takes effect:
+
+```bash
+docker compose kill -s SIGHUP session-manager
+```
+
+`SIGHUP` re-reads `users.yml` without bouncing live game sessions; use `docker compose restart session-manager` if you'd rather force everyone to re-auth.
+
+To revoke access: remove or comment out the entry, then send `SIGHUP` (or restart) as above.
 
 ### Auth methods
 

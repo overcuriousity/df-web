@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -53,6 +54,7 @@ func (s *UserStore) reload() error {
 	for _, u := range list {
 		s.users[u.UID] = u
 	}
+	log.Printf("users: loaded %d user(s) from %s", len(list), s.path)
 	return nil
 }
 

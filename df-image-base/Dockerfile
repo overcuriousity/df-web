@@ -30,9 +30,9 @@ COPY tilesets/ /opt/df/data/art/
 # Patch the shipped config files in place.
 # DF 53.x reads init_default.txt and d_init_default.txt (not init.txt).
 # WINDOWED:YES — needed for headless Xvfb rendering.
-# SOUND:NO    — no audio hardware in the container.
+# SOUND:YES   — audio is captured by PulseAudio null sink and streamed to the browser.
 RUN sed -i 's/^\[WINDOWED:.*\]/[WINDOWED:YES]/' /opt/df/data/init/init_default.txt \
- && sed -i 's/^\[SOUND:.*\]/[SOUND:NO]/'        /opt/df/data/init/init_default.txt
+ && sed -i 's/^\[SOUND:.*\]/[SOUND:YES]/'       /opt/df/data/init/init_default.txt
 
 # Set seasonal autosave in d_init_default.txt.
 RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/' /opt/df/data/init/d_init_default.txt
