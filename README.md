@@ -46,10 +46,9 @@ $EDITOR session-manager/config.yml
 ```bash
 cp session-manager/users.yml.example session-manager/users.yml
 
-# Creates /srv/df/users/<uid>/save/ and prints a users.yml entry + access key
+# Creates /srv/df/users/<uid>/save/, appends the entry to users.yml, and prints the access key
 sudo ./scripts/provision-user.sh alice "Alice"
 
-# Append the printed entry to session-manager/users.yml
 # Share the printed access key with the user out-of-band (treat it like a password)
 ```
 
@@ -102,7 +101,7 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
   passkeys: []       # populated automatically when user self-enrolls at /account
 ```
 
-To add a user: run `scripts/provision-user.sh <uid> "Display Name"`, copy the output into `users.yml`.
+To add a user: run `scripts/provision-user.sh <uid> "Display Name"` — it appends the entry to `users.yml` and prints the access key.
 To revoke access: remove or comment out the entry, then `docker compose restart session-manager`.
 
 ### Auth methods
