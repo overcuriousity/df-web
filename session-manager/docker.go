@@ -3,11 +3,26 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// containerRuntime returns "podman" if CONTAINER_RUNTIME is set to it, or if
+// "docker" is not found in PATH but "podman" is. Defaults to "docker".
+func containerRuntime() string {
+	if rt := os.Getenv("CONTAINER_RUNTIME"); rt != "" {
+		return rt
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		if _, err := exec.LookPath("podman"); err == nil {
+			return "podman"
+		}
+	}
+	return "docker"
+}
 
 // dockerRun starts a DF container for the given user and returns the allocated host port and container ID.
 func dockerRun(cfg *Config, uid, image string, containerPort int) (hostPort int, id string, err error) {
@@ -20,7 +35,10 @@ func dockerRun(cfg *Config, uid, image string, containerPort int) (hostPort int,
 		"--cpus", "1.0",
 		"--memory", "1g",
 		"--pids-limit", "256",
-		"--read-only",
+		// --read-only is intentionally omitted: DF writes errorlog.txt and
+		// gamelog.txt to its working directory (/opt/df) on every run.
+		// Security boundary is the container itself, network isolation, and
+		// the per-user bind-mount for saves.
 		"--tmpfs", "/tmp:size=64m",
 		"--mount", fmt.Sprintf("type=bind,source=%s,target=/save", saveDir),
 		"-P", // publish exposed port to a random host port
@@ -33,13 +51,13 @@ func dockerRun(cfg *Config, uid, image string, containerPort int) (hostPort int,
 	}
 	id = strings.TrimSpace(out)
 
-	// Resolve the host port docker assigned.
+	// Resolve the host port assigned.
 	portOut, err := runDocker("port", id, strconv.Itoa(containerPort))
 	if err != nil {
 		_ = runDockerNoOut("rm", "-f", id)
 		return 0, "", fmt.Errorf("docker port: %w", err)
 	}
-	// Output: 0.0.0.0:XXXXX
+	// Output: 0.0.0.0:XXXXX or [::]:XXXXX
 	parts := strings.Split(strings.TrimSpace(portOut), ":")
 	p, err := strconv.Atoi(parts[len(parts)-1])
 	if err != nil {
@@ -59,7 +77,8 @@ func dockerStop(id string) error {
 }
 
 func runDocker(args ...string) (string, error) {
-	cmd := exec.Command("docker", args...)
+	rt := containerRuntime()
+	cmd := exec.Command(rt, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -30,7 +30,7 @@ func (m *Manager) setSession(w http.ResponseWriter, uid string) {
 		Value:    val,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   !m.cfg.InsecureCookie,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(cookieTTL.Seconds()),
 	})
@@ -38,11 +38,11 @@ func (m *Manager) setSession(w http.ResponseWriter, uid string) {
 
 func (m *Manager) clearSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:    cookieName,
-		Value:   "",
-		Path:    "/",
-		MaxAge:  -1,
-		Secure:  true,
+		Name:     cookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   !m.cfg.InsecureCookie,
 		HttpOnly: true,
 	})
 }

@@ -25,14 +25,19 @@ func main() {
 	// Auth routes
 	mux.HandleFunc("/auth/token", mgr.handleTokenAuth)
 	mux.HandleFunc("/auth/passkey/", mgr.handlePasskey)
-	mux.HandleFunc("/auth/oidc/", mgr.handleOIDC)
+	if cfg.OIDCIssuer != "" {
+		mux.HandleFunc("/auth/oidc/", mgr.handleOIDC)
+	}
 	mux.HandleFunc("/auth/logout", mgr.handleLogout)
 
 	// App routes (require session cookie)
 	mux.Handle("/play", mgr.requireAuth(http.HandlerFunc(mgr.handlePlay)))
-	mux.Handle("/", mgr.requireAuth(http.HandlerFunc(mgr.handleIndex)))
+	mux.Handle("/account", mgr.requireAuth(http.HandlerFunc(mgr.handleAccount)))
 
-	// Static web assets (index.html, play-sdl.html, play-text.html)
+	// Login page is public; authenticated users are redirected to /play.
+	mux.HandleFunc("/", mgr.handleIndex)
+
+	// Static web assets
 	webDir := cfg.WebDir
 	if webDir == "" {
 		webDir = "../web"

@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -59,9 +61,54 @@ func (m *Manager) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// handleIndex serves the landing page.
+var reasonText = map[string]string{
+	"auth":         "Session expired — please log in again.",
+	"unknown_user": "Account not on the allowlist.",
+	"bad_key":      "Invalid key — try again.",
+}
+
+// handleIndex serves the login page, or redirects to /play if already authenticated.
 func (m *Manager) handleIndex(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, fmt.Sprintf("%s/index.html", m.cfg.WebDir))
+	if uid, err := m.sessionUID(r); err == nil {
+		if _, ok := m.store.ByUID(uid); ok {
+			http.Redirect(w, r, "/play", http.StatusFound)
+			return
+		}
+	}
+	tmpl, err := template.ParseFiles(filepath.Join(m.cfg.WebDir, "index.html"))
+	if err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	data := struct {
+		OIDCEnabled bool
+		Reason      string
+	}{
+		OIDCEnabled: m.cfg.OIDCIssuer != "",
+		Reason:      reasonText[r.URL.Query().Get("reason")],
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(w, data)
+}
+
+// handleAccount serves the passkey self-enrollment page.
+func (m *Manager) handleAccount(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+	user, _ := m.store.ByUID(uid)
+	tmpl, err := template.ParseFiles(filepath.Join(m.cfg.WebDir, "account.html"))
+	if err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	data := struct {
+		DisplayName string
+		Passkeys    []PasskeyCredential
+	}{
+		DisplayName: user.DisplayName,
+		Passkeys:    user.Passkeys,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(w, data)
 }
 
 // handleLogout clears the session cookie and redirects home.
@@ -73,20 +120,13 @@ func (m *Manager) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handlePlay ensures a container is running for the user, then proxies the websocket.
 func (m *Manager) handlePlay(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
-	user, _ := m.store.ByUID(uid)
 
-	mode := r.URL.Query().Get("mode")
-	if mode != "sdl" && mode != "text" {
-		mode = user.DefaultMode
-	}
-	if mode != "sdl" && mode != "text" {
-		mode = "sdl"
-	}
+	// DF 53.x is SDL2-only (no terminal/text mode). Mode is always "sdl".
+	mode := "sdl"
 
-	// For non-websocket requests (first page load) serve the appropriate client HTML.
+	// For non-websocket requests (first page load) serve the SDL client HTML.
 	if r.Header.Get("Upgrade") != "websocket" {
-		page := fmt.Sprintf("%s/play-%s.html", m.cfg.WebDir, mode)
-		http.ServeFile(w, r, page)
+		http.ServeFile(w, r, filepath.Join(m.cfg.WebDir, "play-sdl.html"))
 		return
 	}
 
@@ -123,10 +163,6 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 
 	image := m.cfg.ImageSDL
 	port := 6080
-	if mode == "text" {
-		image = m.cfg.ImageText
-		port = 7681
-	}
 
 	hostPort, id, err := dockerRun(m.cfg, uid, image, port)
 	if err != nil {

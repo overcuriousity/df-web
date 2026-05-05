@@ -7,7 +7,6 @@ novnc_dir: "/usr/share/novnc"   # or wherever noVNC is installed on the host
 saves_root: "/srv/df/users"
 
 image_sdl:  "df-image-sdl"
-image_text: "df-image-text"
 docker_network: "df_internal"
 
 idle_timeout: "30m"

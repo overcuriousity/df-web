@@ -6,11 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     websockify \
     novnc \
     xdotool \
+    netcat-openbsd \
     s6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Override PRINT_MODE to STANDARD for SDL rendering.
-RUN sed -i 's/^\[PRINT_MODE:.*\]/[PRINT_MODE:STANDARD]/' /opt/df/data/init/init.txt
+# PRINT_MODE:AUTO lets SDL2 auto-select the renderer (hardware or software).
+# On headless Xvfb it falls back to software, which is fine for DF.
+# No sed override needed — AUTO is already the default in init_default.txt.
 
 # s6 service definitions.
 COPY s6/ /etc/s6/
@@ -19,7 +21,7 @@ COPY s6/ /etc/s6/
 COPY quit-sdl.sh /quit-sdl.sh
 RUN chmod +x /quit-sdl.sh
 
-# noVNC HTML5 client — Debian ships it at /usr/share/novnc; symlink for convenience.
+# noVNC HTML5 client — Debian ships it at /usr/share/novnc.
 RUN ln -sfn /usr/share/novnc /novnc
 
 EXPOSE 6080

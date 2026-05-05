@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account — Dwarf Fortress</title>
+<style>
+  :root { --bg: #1a1a1a; --fg: #d0c8b0; --accent: #8b7355; --btn: #3a3028; --btn-hover: #5a4a38; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: 'Courier New', monospace;
+         display: flex; flex-direction: column; align-items: center; justify-content: center;
+         min-height: 100vh; padding: 2rem; }
+  h1 { font-size: 1.8rem; letter-spacing: 0.1em; color: #c8a870; margin-bottom: 0.4rem; }
+  .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 2.5rem; }
+  .card { background: #242018; border: 1px solid #3a3028; border-radius: 4px;
+          padding: 1.8rem 2rem; width: 100%; max-width: 420px; }
+  h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1.2rem; letter-spacing: 0.05em; }
+  .btn { display: block; width: 100%; padding: 0.7rem 1rem; margin-bottom: 0.8rem;
+         background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+         border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 0.95rem;
+         text-align: center; text-decoration: none; transition: background 0.15s; }
+  .btn:hover { background: var(--btn-hover); }
+  .divider { border: none; border-top: 1px solid #3a3028; margin: 1.2rem 0; }
+  .passkey-list { list-style: none; margin-bottom: 1rem; }
+  .passkey-list li { font-size: 0.85rem; color: #888; padding: 0.3rem 0;
+                     border-bottom: 1px solid #2a2420; }
+  .passkey-list li:last-child { border-bottom: none; }
+  #enroll-status { font-size: 0.85rem; margin-top: 0.8rem; min-height: 1.2em; }
+  .ok  { color: #70c070; }
+  .err { color: #c06060; }
+</style>
+</head>
+<body>
+
+<h1>&#9935; Dwarf Fortress</h1>
+<p class="subtitle">{{.DisplayName}}</p>
+
+<div class="card">
+  <h2>[ Passkeys ]</h2>
+
+  {{if .Passkeys}}
+  <ul class="passkey-list">
+    {{range .Passkeys}}
+    <li>&#128273; {{slice .AAGUID 0 8}}…</li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p style="font-size:0.85rem;color:#666;margin-bottom:1rem;">No passkeys registered yet.</p>
+  {{end}}
+
+  <button class="btn" onclick="enrollPasskey()">&#43; Register a passkey or security key</button>
+  <p id="enroll-status"></p>
+
+  <hr class="divider">
+
+  <a class="btn" href="/play">&#9654; Back to game</a>
+  <a class="btn" href="/auth/logout" style="border-color:#666;color:#888;">Sign out</a>
+</div>
+
+<script src="/static/webauthn.js"></script>
+<script>
+async function enrollPasskey() {
+  const status = document.getElementById('enroll-status');
+  status.className = '';
+  status.textContent = 'Waiting for authenticator…';
+  try {
+    const beginResp = await fetch('/auth/passkey/register/begin');
+    if (!beginResp.ok) throw new Error(await beginResp.text());
+    const options = await beginResp.json();
+
+    options.publicKey.challenge = decodeB64(options.publicKey.challenge);
+    options.publicKey.user.id  = decodeB64(options.publicKey.user.id);
+    if (options.publicKey.excludeCredentials) {
+      options.publicKey.excludeCredentials = options.publicKey.excludeCredentials.map(c => ({
+        ...c, id: decodeB64(c.id)
+      }));
+    }
+
+    const credential = await navigator.credentials.create({ publicKey: options.publicKey });
+
+    const finishResp = await fetch('/auth/passkey/register/finish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(attestationToJSON(credential))
+    });
+    if (!finishResp.ok) throw new Error(await finishResp.text());
+
+    status.className = 'ok';
+    status.textContent = 'Passkey registered! Reload to see it listed.';
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Registration failed: ' + e.message;
+  }
+}
+</script>
+</body>
+</html>

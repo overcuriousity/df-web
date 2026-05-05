@@ -1,6 +1,6 @@
 #!/bin/sh
-# Wait for Xvfb to be ready.
-until xdpyinfo -display :0 >/dev/null 2>&1; do sleep 0.2; done
+# Wait for Xvfb to create its socket before starting VNC.
+until [ -S /tmp/.X11-unix/X0 ]; do sleep 0.2; done
 exec x11vnc \
     -display :0 \
     -forever \

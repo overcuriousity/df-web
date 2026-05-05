@@ -5,23 +5,25 @@ import (
 	"time"
 )
 
-// handleTokenAuth handles GET /auth/token?t=<raw_token>
-// Validates the token, sets a session cookie, and redirects to /play.
+// handleTokenAuth handles POST /auth/token (form field: key).
 func (m *Manager) handleTokenAuth(w http.ResponseWriter, r *http.Request) {
-	raw := r.URL.Query().Get("t")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	raw := r.FormValue("key")
 	if raw == "" {
-		http.Error(w, "missing token", http.StatusBadRequest)
+		http.Redirect(w, r, "/?reason=bad_key", http.StatusFound)
 		return
 	}
 
-	// Rate-limit: one failed attempt per 500ms to slow enumeration.
 	user, ok := m.store.ByToken(raw)
 	if !ok {
 		time.Sleep(500 * time.Millisecond)
-		http.Error(w, "invalid token", http.StatusUnauthorized)
+		http.Redirect(w, r, "/?reason=bad_key", http.StatusFound)
 		return
 	}
 
 	m.setSession(w, user.UID)
-	http.Redirect(w, r, "/play", http.StatusFound)
+	http.Redirect(w, r, "/play", http.StatusSeeOther)
 }

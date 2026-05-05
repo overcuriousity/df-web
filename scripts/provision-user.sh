@@ -26,10 +26,10 @@ Add to users.yml:
   token_hash: "$TOKEN_HASH"
   oidc_sub: ""
   passkeys: []
-  default_mode: "sdl"
 
-Secret token URL (share privately — anyone with this link can log in as $UID_ARG):
-  https://YOUR_DOMAIN/auth/token?t=$RAW_TOKEN
+Access key (share privately — this is the key the user pastes into the login form):
+  $RAW_TOKEN
 
-Save the raw token somewhere safe; it cannot be recovered from the hash.
+Save the raw key somewhere safe; it cannot be recovered from the hash.
+After the user logs in with this key they can enroll a passkey at /account.
 EOF

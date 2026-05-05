@@ -26,9 +26,8 @@ func (u *dfUser) WebAuthnCredentials() []webauthn.Credential {
 		pk, _ := decodeBase64URL(c.PublicKey)
 		aaguid, _ := decodeBase64URL(c.AAGUID)
 		out = append(out, webauthn.Credential{
-			ID:              id,
-			PublicKey:       pk,
-			AttestationType: "",
+			ID:        id,
+			PublicKey: pk,
 			Authenticator: webauthn.Authenticator{
 				AAGUID:    aaguid,
 				SignCount: c.SignCount,
@@ -40,10 +39,11 @@ func (u *dfUser) WebAuthnCredentials() []webauthn.Credential {
 
 // handlePasskey routes /auth/passkey/* requests.
 // Routes:
-//   GET  /auth/passkey/register/begin?uid=<uid>   → begin attestation (admin only, uid must exist)
-//   POST /auth/passkey/register/finish?uid=<uid>  → finish attestation
-//   GET  /auth/passkey/login/begin                → begin assertion (discovers all registered users)
-//   POST /auth/passkey/login/finish               → finish assertion
+//
+//	GET  /auth/passkey/register/begin   → begin attestation (requires session)
+//	POST /auth/passkey/register/finish  → finish attestation (requires session)
+//	GET  /auth/passkey/login/begin      → begin assertion (discoverable, public)
+//	POST /auth/passkey/login/finish     → finish assertion (public)
 func (m *Manager) handlePasskey(w http.ResponseWriter, r *http.Request) {
 	wa, err := m.webauthn()
 	if err != nil {
@@ -54,9 +54,19 @@ func (m *Manager) handlePasskey(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/auth/passkey/")
 	switch {
 	case path == "register/begin" && r.Method == http.MethodGet:
-		m.passkeyRegisterBegin(w, r, wa)
+		uid, err := m.sessionUID(r)
+		if err != nil {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		m.passkeyRegisterBegin(w, r, wa, uid)
 	case path == "register/finish" && r.Method == http.MethodPost:
-		m.passkeyRegisterFinish(w, r, wa)
+		uid, err := m.sessionUID(r)
+		if err != nil {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		m.passkeyRegisterFinish(w, r, wa, uid)
 	case path == "login/begin" && r.Method == http.MethodGet:
 		m.passkeyLoginBegin(w, r, wa)
 	case path == "login/finish" && r.Method == http.MethodPost:
@@ -66,8 +76,6 @@ func (m *Manager) handlePasskey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// passkeySessionStore is an in-memory store for WebAuthn ceremony sessions.
-// A real deployment should use a proper KV store but for a small server this suffices.
 var passkeySessionStore = newInMemorySessionStore()
 
 func (m *Manager) webauthn() (*webauthn.WebAuthn, error) {
@@ -78,8 +86,7 @@ func (m *Manager) webauthn() (*webauthn.WebAuthn, error) {
 	})
 }
 
-func (m *Manager) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
-	uid := r.URL.Query().Get("uid")
+func (m *Manager) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn, uid string) {
 	user, ok := m.store.ByUID(uid)
 	if !ok {
 		http.Error(w, "user not found", http.StatusNotFound)
@@ -94,8 +101,7 @@ func (m *Manager) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request, w
 	writeJSON(w, options)
 }
 
-func (m *Manager) passkeyRegisterFinish(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
-	uid := r.URL.Query().Get("uid")
+func (m *Manager) passkeyRegisterFinish(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn, uid string) {
 	user, ok := m.store.ByUID(uid)
 	if !ok {
 		http.Error(w, "user not found", http.StatusNotFound)
@@ -124,8 +130,7 @@ func (m *Manager) passkeyRegisterFinish(w http.ResponseWriter, r *http.Request, 
 		AAGUID:    encodeBase64URL(credential.Authenticator.AAGUID),
 		SignCount: credential.Authenticator.SignCount,
 	}
-	updated := append(user.Passkeys, newCred)
-	if err := m.store.UpdatePasskeys(uid, updated); err != nil {
+	if err := m.store.UpdatePasskeys(uid, append(user.Passkeys, newCred)); err != nil {
 		log.Printf("save passkey: %v", err)
 		http.Error(w, "save error", http.StatusInternalServerError)
 		return
@@ -134,7 +139,6 @@ func (m *Manager) passkeyRegisterFinish(w http.ResponseWriter, r *http.Request, 
 }
 
 func (m *Manager) passkeyLoginBegin(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
-	// Discoverable credentials: no username needed; browser presents stored keys.
 	options, session, err := wa.BeginDiscoverableLogin()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -156,7 +160,6 @@ func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa 
 		return
 	}
 
-	// Discoverable login: find the user by credential ID returned in the response.
 	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
 		uid := string(userHandle)
 		user, ok := m.store.ByUID(uid)
@@ -173,7 +176,6 @@ func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa 
 	}
 	passkeySessionStore.delete("login")
 
-	// Update sign count in storage.
 	uid := string(parsedResponse.Response.UserHandle)
 	user, _ := m.store.ByUID(uid)
 	for i, c := range user.Passkeys {

@@ -15,20 +15,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   mkdir df-image-base/df
 #   tar -xjf df_53.12_linux.tar.bz2 -C df-image-base/df --strip-components=1
 #
-# df-image-base/df/ should contain: dwarfort, data/, raw/, stonesense/ etc.
+# df-image-base/df/ should contain: dwarfort, data/, raw/, etc.
 COPY df/ /opt/df/
+RUN chmod +x /opt/df/dwarfort
 
-# Save directory lives on a bind-mount; replace the in-image dir with a symlink.
-# The mount point is always /save.
-RUN rm -rf /opt/df/data/save && ln -s /save /opt/df/data/save \
- && chmod +x /opt/df/dwarfort
+# Save directory lives on a bind-mount at /save.
+# Replace the in-image dir with a symlink so DF writes to the mount.
+RUN rm -rf /opt/df/data/save && ln -s /save /opt/df/data/save
 
 # Bake tilesets (admin-managed): copy PNGs into the art directory.
 # Drop PNG files into df-image-base/tilesets/ to include them.
 COPY tilesets/ /opt/df/data/art/
 
-# Baseline config and keybinds — SDL/text variants override PRINT_MODE in their own layer.
-COPY init.txt /opt/df/data/init/init.txt
+# Patch the shipped config files in place.
+# DF 53.x reads init_default.txt and d_init_default.txt (not init.txt).
+# WINDOWED:YES — needed for headless Xvfb rendering.
+# SOUND:NO    — no audio hardware in the container.
+RUN sed -i 's/^\[WINDOWED:.*\]/[WINDOWED:YES]/' /opt/df/data/init/init_default.txt \
+ && sed -i 's/^\[SOUND:.*\]/[SOUND:NO]/'        /opt/df/data/init/init_default.txt
+
+# Set seasonal autosave in d_init_default.txt.
+RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/' /opt/df/data/init/d_init_default.txt
+
+# Apply keyboard interface overrides (empty by default; customise and rebuild to add binds).
 COPY interface.txt /opt/df/data/init/interface.txt
 
 COPY entrypoint.sh /entrypoint.sh

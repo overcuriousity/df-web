@@ -13,7 +13,6 @@ type Config struct {
 	NoVNCDir    string        `yaml:"novnc_dir"`   // e.g. /usr/share/novnc
 	SavesRoot   string        `yaml:"saves_root"`     // /srv/df/users
 	ImageSDL    string        `yaml:"image_sdl"`      // df-image-sdl
-	ImageText   string        `yaml:"image_text"`     // df-image-text
 	Network     string        `yaml:"docker_network"` // df_internal
 	IdleTimeout time.Duration `yaml:"idle_timeout"`   // 30m
 	MaxSessions int           `yaml:"max_sessions"`   // 5
@@ -24,7 +23,8 @@ type Config struct {
 	OIDCRedirect string       `yaml:"oidc_redirect_uri"`
 	RPOrigins   []string      `yaml:"rp_origins"`     // WebAuthn relying party origins
 	RPID        string        `yaml:"rp_id"`          // WebAuthn relying party ID (hostname)
-	RPName      string        `yaml:"rp_display_name"`
+	RPName         string `yaml:"rp_display_name"`
+	InsecureCookie bool   `yaml:"insecure_cookie"` // set true for HTTP-only local dev
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -44,9 +44,6 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if cfg.ImageSDL == "" {
 		cfg.ImageSDL = "df-image-sdl"
-	}
-	if cfg.ImageText == "" {
-		cfg.ImageText = "df-image-text"
 	}
 	if cfg.Network == "" {
 		cfg.Network = "df_internal"

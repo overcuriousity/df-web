@@ -4,9 +4,9 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 
 ## Features
 
-- **Two render modes** — SDL (tilesets, full graphics via noVNC) or Text (terminal via ttyd/xterm.js). Users choose on the landing page; SDL is the default.
-- **Three auth methods** — secret token URL, WebAuthn passkey/YubiKey, or OIDC (Nextcloud).
-- **Session persistence** — saves survive browser closes and idle timeouts. The game process stays alive between disconnects in text mode; SDL mode auto-saves seasonally.
+- **SDL render mode** — full graphics via noVNC (tilesets, mouse support).
+- **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC (shown only when configured).
+- **Session persistence** — saves survive browser closes and idle timeouts; the game process stays alive between disconnects.
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
 - **Admin-managed tilesets** — baked into the container image; no remote filesystem access for players.
@@ -33,20 +33,25 @@ tar -xjf df_53.12_linux.tar.bz2 -C df-image-base/df --strip-components=1
 ### 2. Configure
 
 ```bash
-# Generate a cookie signing key
-openssl rand -hex 32
+cp session-manager/config.yml.example session-manager/config.yml
 
-# Edit session-manager/config.yml — fill in cookie_key, rp_id, rp_origins
-# (and oidc_* fields if using Nextcloud auth)
+# Fill in cookie_key (required), rp_id, rp_origins.
+# Set oidc_* only if using OIDC single sign-on.
 $EDITOR session-manager/config.yml
 ```
+
+`cookie_key` must be 64 hex characters: `openssl rand -hex 32`
 
 ### 3. Provision users
 
 ```bash
-# Creates /srv/df/users/<uid>/save/ and prints a users.yml skeleton + secret token URL
+cp session-manager/users.yml.example session-manager/users.yml
+
+# Creates /srv/df/users/<uid>/save/ and prints a users.yml entry + access key
 sudo ./scripts/provision-user.sh alice "Alice"
-# Add the printed entry to session-manager/users.yml
+
+# Append the printed entry to session-manager/users.yml
+# Share the printed access key with the user out-of-band (treat it like a password)
 ```
 
 ### 4. Build images
@@ -54,7 +59,6 @@ sudo ./scripts/provision-user.sh alice "Alice"
 ```bash
 docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
-docker build -t df-image-text ./df-image-text
 ```
 
 ### 5. Run
@@ -64,6 +68,8 @@ docker compose up -d
 ```
 
 Point your reverse proxy at `http://127.0.0.1:8080`.
+
+> **Podman**: the session manager auto-detects Podman when Docker is not in PATH, or when `CONTAINER_RUNTIME=podman` is set. Ensure the Podman socket is running: `systemctl --user start podman.socket`.
 
 ## Configuration
 
@@ -76,7 +82,6 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 | `novnc_dir` | `/usr/share/novnc` | Path to noVNC static files on the host |
 | `saves_root` | `/srv/df/users` | Root directory for per-user save volumes |
 | `image_sdl` | `df-image-sdl` | Docker image name for SDL mode |
-| `image_text` | `df-image-text` | Docker image name for text mode |
 | `docker_network` | `df_internal` | Docker network for game containers |
 | `idle_timeout` | `30m` | Inactivity time before container is stopped and game is saved |
 | `max_sessions` | `5` | Maximum concurrent game containers |
@@ -96,37 +101,43 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 ```yaml
 - uid: "alice"
   display_name: "Alice"
-  token_hash: "<sha256 hex of raw token>"  # from provision-user.sh
-  oidc_sub: ""                              # Nextcloud subject claim, if using OIDC
-  passkeys: []                              # populated automatically on registration
-  default_mode: "sdl"                       # "sdl" or "text"
+  token_hash: "<hex SHA-256 of the raw access key>"  # from provision-user.sh
+  oidc_sub: ""       # OIDC subject claim — leave blank if not using OIDC
+  passkeys: []       # populated automatically when user self-enrolls at /account
 ```
 
-To add a user: run `scripts/provision-user.sh <uid>`, copy the output into `users.yml`.
+To add a user: run `scripts/provision-user.sh <uid> "Display Name"`, copy the output into `users.yml`.
 To revoke access: remove or comment out the entry. Changes are picked up on the next request.
 
-### Registering a passkey / YubiKey
+### Auth methods
 
-Passkey registration is admin-initiated to prevent self-registration:
+**String-key** — the default. The user pastes their access key into the form on `/`. The key is hashed (SHA-256) before comparison; the hash is what's stored in `users.yml`. Treat the raw key like a password.
 
-```bash
-# While logged in as the user (session cookie present), open in a browser:
-https://df.example.com/auth/passkey/register/begin?uid=alice
-# Then POST the response to /auth/passkey/register/finish?uid=alice
-# The web UI's login page handles this flow automatically after first login via token.
-```
+**Passkey / YubiKey** — self-enrollment flow:
+1. User logs in once with their string-key.
+2. User visits `/account` and clicks "Register a passkey or security key".
+3. Browser/OS guides through the WebAuthn ceremony (platform authenticator, YubiKey, etc.).
+4. `users.yml` is updated automatically with the new credential.
+5. On future visits the user clicks "Login with Passkey / YubiKey" on the login page — no key entry needed.
+
+**OIDC (single sign-on)** — set `oidc_issuer`, `oidc_client_id`, `oidc_client_secret`, and `oidc_redirect_uri` in `config.yml`. The SSO button appears on the login page automatically when `oidc_issuer` is non-empty. Pre-create users in `users.yml` with their `oidc_sub` claim populated.
+
+**Session cookie** — the `dfsess` cookie is HMAC-SHA-256 signed with `cookie_key`. It is not encrypted; the UID is readable in the cookie value. Set `insecure_cookie: true` only for HTTP-only local development; never in production.
 
 ## Tilesets
 
-Place tileset PNG files in `df-image-base/tilesets/` and rebuild the base image:
+Place tileset PNG files in `df-image-base/tilesets/` and add `sed` lines to `df-image-base/Dockerfile` to apply them, then rebuild:
+
+```dockerfile
+# in df-image-base/Dockerfile, after the existing sed block:
+RUN sed -i 's/^\[FONT:.*\]/[FONT:MyTileset.png]/'         /opt/df/data/init/init_default.txt \
+ && sed -i 's/^\[FULLFONT:.*\]/[FULLFONT:MyTileset.png]/' /opt/df/data/init/init_default.txt
+```
 
 ```bash
-cp MyTileset.png df-image-base/tilesets/
 docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
 ```
-
-Edit `df-image-base/init.txt` to set `[FONT:MyTileset.png]` and `[FULLFONT:MyTileset.png]`.
 
 ## Architecture
 
@@ -134,22 +145,22 @@ Edit `df-image-base/init.txt` to set `[FONT:MyTileset.png]` and `[FULLFONT:MyTil
 Browser → (your TLS reverse proxy) → 127.0.0.1:8080
                                            │
                                     Session Manager (Go)
-                                    ├─ /auth/token      secret URL → cookie
-                                    ├─ /auth/passkey/*  WebAuthn
-                                    ├─ /auth/oidc/*     Nextcloud OIDC
-                                    └─ /play            websocket proxy
+                                    ├─ /             login page
+                                    ├─ /account      passkey self-enrollment
+                                    ├─ /auth/token   string-key → cookie
+                                    ├─ /auth/passkey/* WebAuthn
+                                    ├─ /auth/oidc/*  OIDC (when configured)
+                                    └─ /play         websocket proxy → container
                                            │
-                           ┌───────────────┴───────────────┐
-                     SDL container                    Text container
-                     Xvfb + x11vnc                   ttyd + dtach
-                     websockify + noVNC               xterm.js
-                     DF (PRINT_MODE:STANDARD)         DF (PRINT_MODE:TEXT)
+                                     SDL container
+                                     Xvfb + x11vnc
+                                     websockify + noVNC
+                                     DF (SDL2)
 ```
 
 Each game container:
 - Is started on demand, stopped after `idle_timeout` of inactivity
 - Has its own bind-mounted save directory (`/srv/df/users/<uid>/save/`)
-- Runs with a read-only root filesystem; only the save mount is writable
 - Is attached only to the internal Docker network (no internet egress)
 - Is limited to 1 CPU / 1 GB RAM / 256 PIDs
 
