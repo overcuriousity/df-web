@@ -5,4 +5,18 @@ until nc -z 127.0.0.1 5900 2>/dev/null; do sleep 0.3; done
 
 export DISPLAY=:0
 cd /opt/df
-exec ./dwarfort 2>&1
+
+# On SIGTERM (sent by s6 during container shutdown) send the in-game quit-save
+# key sequence, then wait for DF to finish writing the save before exiting.
+# s6 sends SIGTERM only to this shell's PID, not to the DF process group, so DF
+# stays alive long enough for the key sequence to take effect.
+_quit() {
+    /quit-sdl.sh
+    wait "$DF_PID" 2>/dev/null
+    exit 0
+}
+trap _quit TERM
+
+./dwarfort &
+DF_PID=$!
+wait "$DF_PID"

@@ -78,6 +78,8 @@ func (m *Manager) handlePasskey(w http.ResponseWriter, r *http.Request) {
 
 var passkeySessionStore = newInMemorySessionStore()
 
+const passkeyNonceCookie = "pkn"
+
 func (m *Manager) webauthn() (*webauthn.WebAuthn, error) {
 	return webauthn.New(&webauthn.Config{
 		RPDisplayName: m.cfg.RPName,
@@ -144,12 +146,30 @@ func (m *Manager) passkeyLoginBegin(w http.ResponseWriter, r *http.Request, wa *
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	passkeySessionStore.put("login", session)
+	nonce := randomToken()
+	passkeySessionStore.put("login:"+nonce, session)
+	http.SetCookie(w, &http.Cookie{
+		Name:     passkeyNonceCookie,
+		Value:    nonce,
+		Path:     "/auth/passkey/",
+		HttpOnly: true,
+		Secure:   !m.cfg.InsecureCookie,
+		MaxAge:   5 * 60,
+		SameSite: http.SameSiteLaxMode,
+	})
 	writeJSON(w, options)
 }
 
 func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
-	session, ok := passkeySessionStore.get("login")
+	nonceCookie, err := r.Cookie(passkeyNonceCookie)
+	if err != nil {
+		http.Error(w, "no login in progress", http.StatusBadRequest)
+		return
+	}
+	key := "login:" + nonceCookie.Value
+	http.SetCookie(w, &http.Cookie{Name: passkeyNonceCookie, MaxAge: -1, Path: "/auth/passkey/"})
+
+	session, ok := passkeySessionStore.get(key)
 	if !ok {
 		http.Error(w, "no login in progress", http.StatusBadRequest)
 		return
@@ -174,7 +194,7 @@ func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa 
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
 	}
-	passkeySessionStore.delete("login")
+	passkeySessionStore.delete(key)
 
 	uid := string(parsedResponse.Response.UserHandle)
 	user, _ := m.store.ByUID(uid)

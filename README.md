@@ -6,7 +6,7 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 
 - **SDL render mode** — full graphics via noVNC (tilesets, mouse support).
 - **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC (shown only when configured).
-- **Session persistence** — saves survive browser closes and idle timeouts; the game process stays alive between disconnects.
+- **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. On idle timeout the game is saved before the container stops.
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
 - **Admin-managed tilesets** — baked into the container image; no remote filesystem access for players.
@@ -107,7 +107,7 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 ```
 
 To add a user: run `scripts/provision-user.sh <uid> "Display Name"`, copy the output into `users.yml`.
-To revoke access: remove or comment out the entry. Changes are picked up on the next request.
+To revoke access: remove or comment out the entry, then `docker compose restart session-manager`.
 
 ### Auth methods
 

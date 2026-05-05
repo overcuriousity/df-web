@@ -61,7 +61,7 @@ func (m *Manager) oidcLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    state,
 		Path:     "/auth/oidc/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   !m.cfg.InsecureCookie,
 		MaxAge:   int((5 * time.Minute).Seconds()),
 		SameSite: http.SameSiteLaxMode,
 	})

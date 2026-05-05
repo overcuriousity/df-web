@@ -40,8 +40,5 @@ RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/' /opt/df/data/init/d_init_de
 # Apply keyboard interface overrides (empty by default; customise and rebuild to add binds).
 COPY interface.txt /opt/df/data/init/interface.txt
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 VOLUME ["/save"]
 WORKDIR /opt/df
