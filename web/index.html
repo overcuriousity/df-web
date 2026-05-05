@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dwarf Fortress</title>
+<style>
+  :root { --bg: #1a1a1a; --fg: #d0c8b0; --accent: #8b7355; --btn: #3a3028; --btn-hover: #5a4a38; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: 'Courier New', monospace;
+         display: flex; flex-direction: column; align-items: center; justify-content: center;
+         min-height: 100vh; padding: 2rem; }
+  h1 { font-size: 1.8rem; letter-spacing: 0.1em; color: #c8a870; margin-bottom: 0.4rem; }
+  .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 2.5rem; }
+  .card { background: #242018; border: 1px solid #3a3028; border-radius: 4px;
+          padding: 1.8rem 2rem; width: 100%; max-width: 380px; }
+  h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1.2rem; letter-spacing: 0.05em; }
+  .btn { display: block; width: 100%; padding: 0.7rem 1rem; margin-bottom: 0.8rem;
+         background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+         border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 0.95rem;
+         text-align: center; text-decoration: none; transition: background 0.15s; }
+  .btn:hover { background: var(--btn-hover); }
+  .btn:last-child { margin-bottom: 0; }
+  .divider { border: none; border-top: 1px solid #3a3028; margin: 1.2rem 0; }
+  .mode-label { font-size: 0.78rem; color: #666; margin-bottom: 0.5rem; }
+  .mode-picker { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .mode-picker input[type=radio] { display: none; }
+  .mode-picker label { flex: 1; padding: 0.4rem; border: 1px solid #3a3028; border-radius: 3px;
+                        text-align: center; font-size: 0.85rem; cursor: pointer; transition: all 0.15s; }
+  .mode-picker input[type=radio]:checked + label { border-color: var(--accent); color: #c8a870; }
+  #passkey-status { font-size: 0.8rem; color: #888; margin-top: 0.6rem; min-height: 1.2em; }
+  .error { color: #c06060; font-size: 0.85rem; margin-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>⛏ Dwarf Fortress</h1>
+<p class="subtitle">Lose yourself in the depths.</p>
+
+<div class="card">
+  <h2>[ Login ]</h2>
+
+  <p class="mode-label">Render mode:</p>
+  <div class="mode-picker">
+    <input type="radio" name="mode" id="mode-sdl" value="sdl" checked>
+    <label for="mode-sdl">SDL (tiles)</label>
+    <input type="radio" name="mode" id="mode-text" value="text">
+    <label for="mode-text">Text (terminal)</label>
+  </div>
+
+  <!-- Passkey / YubiKey -->
+  <button class="btn" onclick="passkeyLogin()">🔑 Login with Passkey / YubiKey</button>
+  <p id="passkey-status"></p>
+
+  <hr class="divider">
+
+  <!-- OIDC (Nextcloud) -->
+  <a class="btn" href="/auth/oidc/login" onclick="storeMode()">☁ Login with Nextcloud</a>
+
+  <hr class="divider">
+
+  <!-- Token URL hint -->
+  <p style="font-size:0.8rem;color:#666;text-align:center;">
+    Have a secret login link? Just open it in your browser.
+  </p>
+
+  <div id="error-msg" class="error"></div>
+</div>
+
+<script>
+function getMode() {
+  return document.querySelector('input[name=mode]:checked').value;
+}
+
+function storeMode() {
+  sessionStorage.setItem('df_mode', getMode());
+}
+
+async function passkeyLogin() {
+  const status = document.getElementById('passkey-status');
+  const errDiv = document.getElementById('error-msg');
+  status.textContent = 'Waiting for authenticator…';
+  errDiv.textContent = '';
+  try {
+    // 1. Begin
+    const beginResp = await fetch('/auth/passkey/login/begin');
+    if (!beginResp.ok) throw new Error(await beginResp.text());
+    const options = await beginResp.json();
+
+    // Decode base64url fields for the WebAuthn API.
+    options.publicKey.challenge = decodeB64(options.publicKey.challenge);
+    if (options.publicKey.allowCredentials) {
+      options.publicKey.allowCredentials = options.publicKey.allowCredentials.map(c => ({
+        ...c, id: decodeB64(c.id)
+      }));
+    }
+
+    // 2. Browser prompt
+    const credential = await navigator.credentials.get({ publicKey: options.publicKey });
+
+    // 3. Finish
+    const finishResp = await fetch('/auth/passkey/login/finish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentialToJSON(credential))
+    });
+    if (!finishResp.ok) throw new Error(await finishResp.text());
+    const result = await finishResp.json();
+    status.textContent = 'Authenticated! Redirecting…';
+    const mode = getMode();
+    window.location.href = result.redirect + (mode !== 'sdl' ? '?mode=' + mode : '');
+  } catch (e) {
+    status.textContent = '';
+    errDiv.textContent = 'Login failed: ' + e.message;
+  }
+}
+
+function decodeB64(b64url) {
+  const s = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(s);
+  return Uint8Array.from(bin, c => c.charCodeAt(0));
+}
+
+function encodeB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function credentialToJSON(cred) {
+  return {
+    id: cred.id,
+    rawId: encodeB64(cred.rawId),
+    type: cred.type,
+    response: {
+      authenticatorData: encodeB64(cred.response.authenticatorData),
+      clientDataJSON: encodeB64(cred.response.clientDataJSON),
+      signature: encodeB64(cred.response.signature),
+      userHandle: cred.response.userHandle ? encodeB64(cred.response.userHandle) : null,
+    }
+  };
+}
+
+// If returning from OIDC redirect, apply stored mode.
+const storedMode = sessionStorage.getItem('df_mode');
+if (storedMode) {
+  const el = document.getElementById('mode-' + storedMode);
+  if (el) el.checked = true;
+}
+
+// Show query-string errors (e.g. ?reason=auth).
+const params = new URLSearchParams(location.search);
+if (params.get('reason')) {
+  document.getElementById('error-msg').textContent =
+    { auth: 'Session expired — please log in again.',
+      unknown_user: 'Account not on the allowlist.' }[params.get('reason')] || 'Please log in.';
+}
+</script>
+</body>
+</html>

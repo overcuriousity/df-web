@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dwarf Fortress – SDL</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  #toolbar { background: #1a1a1a; border-bottom: 1px solid #3a3028; padding: 0.4rem 0.8rem;
+             display: flex; align-items: center; gap: 1rem; flex-shrink: 0; font-family: monospace; font-size: 0.85rem; color: #888; }
+  #toolbar a { color: #8b7355; text-decoration: none; }
+  #toolbar a:hover { color: #c8a870; }
+  #fs-hint { color: #c8a870; font-size: 0.8rem; }
+  #novnc-frame { flex: 1; width: 100%; border: none; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <span>⛏ Dwarf Fortress</span>
+  <span id="fs-hint">Press F11 or click ⛶ for fullscreen (recommended for best keyboard capture)</span>
+  <span style="margin-left:auto">
+    <a href="/play?mode=text">Switch to text mode</a> &nbsp;|&nbsp;
+    <a href="/auth/logout">Logout</a>
+  </span>
+</div>
+<!-- noVNC is served by websockify from the container, proxied by /play websocket route. -->
+<!-- We embed it via an iframe so the page shell stays accessible. -->
+<iframe id="novnc-frame" src="about:blank" allowfullscreen></iframe>
+
+<script>
+// Build the noVNC URL pointing to our websocket proxy endpoint.
+// The noVNC client is served from the container via websockify's --web flag.
+// We proxy the whole path through /play, so we load noVNC via a relative path that
+// the session manager serves directly from the container on the /play websocket.
+//
+// Simpler: load the noVNC page in the iframe, pointing at our /play websocket endpoint.
+// noVNC's vnc.html accepts ?path=... and ?host=... query params.
+
+const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+const wsBase = `${wsProto}://${location.host}/play`;
+
+// We use noVNC's standalone vnc.html served from /novnc/ (mapped by the session manager
+// to the container's noVNC static files via a separate /novnc/ static route).
+const novncUrl = `/novnc/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000` +
+  `&path=play&resize=scale&show_dot=false&bell=false`;
+
+document.getElementById('novnc-frame').src = novncUrl;
+
+// Keyboard Lock API — requests exclusive keyboard access in fullscreen (Chromium only).
+async function requestKeyboardLock() {
+  if (navigator.keyboard && navigator.keyboard.lock) {
+    try {
+      // Lock keys that DF uses that browsers otherwise steal.
+      await navigator.keyboard.lock(['Escape', 'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12']);
+      document.getElementById('fs-hint').textContent = '⌨ Keyboard captured.';
+    } catch (e) {
+      document.getElementById('fs-hint').textContent = 'Keyboard Lock not available in this browser.';
+    }
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement) requestKeyboardLock();
+});
+
+// Auto-fullscreen the iframe on click inside it (best effort).
+document.getElementById('novnc-frame').addEventListener('load', () => {
+  document.getElementById('fs-hint').textContent =
+    'Click inside the game and press F11 for best keyboard capture.';
+});
+</script>
+</body>
+</html>

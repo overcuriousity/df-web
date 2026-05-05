@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dwarf Fortress – Text</title>
+<!-- xterm.js from CDN; for offline/self-hosted use, vendor the files. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-attach@0.10.0/lib/xterm-addon-attach.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  #toolbar { background: #1a1a1a; border-bottom: 1px solid #3a3028; padding: 0.4rem 0.8rem;
+             display: flex; align-items: center; gap: 1rem; flex-shrink: 0; font-family: monospace; font-size: 0.85rem; color: #888; }
+  #toolbar a { color: #8b7355; text-decoration: none; }
+  #toolbar a:hover { color: #c8a870; }
+  #term-container { flex: 1; width: 100%; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <span>⛏ Dwarf Fortress [text mode]</span>
+  <span style="font-size:0.8rem;color:#c8a870" id="kb-hint">Click the terminal and press F11 for full keyboard capture.</span>
+  <span style="margin-left:auto">
+    <a href="/play?mode=sdl">Switch to SDL mode</a> &nbsp;|&nbsp;
+    <a href="/auth/logout">Logout</a>
+  </span>
+</div>
+<div id="term-container"></div>
+
+<script>
+// ttyd exposes a websocket at its root (/ws) which speaks the ttyd protocol.
+// Our session manager proxies /play (websocket) to the container's ttyd port.
+// ttyd's xterm.js client is embedded here manually to avoid a double iframe.
+
+const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+const wsUrl = `${wsProto}://${location.host}/play`;
+
+const term = new Terminal({
+  cols: 160,
+  rows: 50,
+  fontFamily: '"Courier New", Courier, monospace',
+  fontSize: 14,
+  theme: {
+    background: '#000000',
+    foreground: '#d0c8b0',
+    cursor: '#c8a870',
+  },
+  allowProposedApi: true,
+  // Enable modifier keys to pass through to the app.
+  macOptionIsMeta: true,
+  scrollback: 0,
+});
+
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('term-container'));
+fitAddon.fit();
+
+// Connect to ttyd websocket.
+const socket = new WebSocket(wsUrl);
+socket.binaryType = 'arraybuffer';
+
+// ttyd protocol: first byte is message type.
+// 0 = output data, 1 = set window title, 2 = set preferences.
+// To send input: prepend byte 0x00 to the data.
+socket.addEventListener('open', () => {
+  document.getElementById('kb-hint').textContent = 'Connected. Click to focus, F11 for fullscreen.';
+  // Send terminal size on connect.
+  sendResize();
+});
+
+socket.addEventListener('message', evt => {
+  const data = new Uint8Array(evt.data);
+  const type = data[0];
+  if (type === 0) {
+    // Output data.
+    term.write(data.slice(1));
+  }
+  // Ignore title (1) and pref (2) messages.
+});
+
+socket.addEventListener('close', () => {
+  term.write('\r\n\x1b[33m[disconnected — reload to reconnect]\x1b[0m\r\n');
+});
+
+term.onData(data => {
+  if (socket.readyState === WebSocket.OPEN) {
+    const buf = new Uint8Array(1 + data.length);
+    buf[0] = 0x00; // input type
+    for (let i = 0; i < data.length; i++) buf[i + 1] = data.charCodeAt(i);
+    socket.send(buf);
+  }
+});
+
+function sendResize() {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  const msg = JSON.stringify({ columns: term.cols, rows: term.rows });
+  const buf = new Uint8Array(1 + msg.length);
+  buf[0] = 0x01; // resize type
+  for (let i = 0; i < msg.length; i++) buf[i + 1] = msg.charCodeAt(i);
+  socket.send(buf);
+}
+
+window.addEventListener('resize', () => { fitAddon.fit(); sendResize(); });
+
+// Keyboard Lock for fullscreen.
+document.addEventListener('fullscreenchange', async () => {
+  if (document.fullscreenElement && navigator.keyboard && navigator.keyboard.lock) {
+    try {
+      await navigator.keyboard.lock(['Escape','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12']);
+      document.getElementById('kb-hint').textContent = '⌨ Keyboard captured.';
+    } catch(_) {}
+  }
+});
+</script>
+</body>
+</html>

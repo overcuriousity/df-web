@@ -1,0 +1,2 @@
+#!/bin/sh
+exec Xvfb :0 -screen 0 ${XVFB_RESOLUTION:-1280x800x24} -nolisten tcp 2>&1

@@ -1,0 +1,195 @@
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"strings"
+
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
+)
+
+// dfUser adapts our User to the go-webauthn User interface.
+type dfUser struct {
+	user *User
+}
+
+func (u *dfUser) WebAuthnID() []byte         { return []byte(u.user.UID) }
+func (u *dfUser) WebAuthnName() string        { return u.user.UID }
+func (u *dfUser) WebAuthnDisplayName() string { return u.user.DisplayName }
+func (u *dfUser) WebAuthnIcon() string        { return "" }
+func (u *dfUser) WebAuthnCredentials() []webauthn.Credential {
+	var out []webauthn.Credential
+	for _, c := range u.user.Passkeys {
+		id, _ := decodeBase64URL(c.ID)
+		pk, _ := decodeBase64URL(c.PublicKey)
+		aaguid, _ := decodeBase64URL(c.AAGUID)
+		out = append(out, webauthn.Credential{
+			ID:              id,
+			PublicKey:       pk,
+			AttestationType: "",
+			Authenticator: webauthn.Authenticator{
+				AAGUID:    aaguid,
+				SignCount: c.SignCount,
+			},
+		})
+	}
+	return out
+}
+
+// handlePasskey routes /auth/passkey/* requests.
+// Routes:
+//   GET  /auth/passkey/register/begin?uid=<uid>   → begin attestation (admin only, uid must exist)
+//   POST /auth/passkey/register/finish?uid=<uid>  → finish attestation
+//   GET  /auth/passkey/login/begin                → begin assertion (discovers all registered users)
+//   POST /auth/passkey/login/finish               → finish assertion
+func (m *Manager) handlePasskey(w http.ResponseWriter, r *http.Request) {
+	wa, err := m.webauthn()
+	if err != nil {
+		http.Error(w, "webauthn not configured", http.StatusInternalServerError)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/auth/passkey/")
+	switch {
+	case path == "register/begin" && r.Method == http.MethodGet:
+		m.passkeyRegisterBegin(w, r, wa)
+	case path == "register/finish" && r.Method == http.MethodPost:
+		m.passkeyRegisterFinish(w, r, wa)
+	case path == "login/begin" && r.Method == http.MethodGet:
+		m.passkeyLoginBegin(w, r, wa)
+	case path == "login/finish" && r.Method == http.MethodPost:
+		m.passkeyLoginFinish(w, r, wa)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// passkeySessionStore is an in-memory store for WebAuthn ceremony sessions.
+// A real deployment should use a proper KV store but for a small server this suffices.
+var passkeySessionStore = newInMemorySessionStore()
+
+func (m *Manager) webauthn() (*webauthn.WebAuthn, error) {
+	return webauthn.New(&webauthn.Config{
+		RPDisplayName: m.cfg.RPName,
+		RPID:          m.cfg.RPID,
+		RPOrigins:     m.cfg.RPOrigins,
+	})
+}
+
+func (m *Manager) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
+	uid := r.URL.Query().Get("uid")
+	user, ok := m.store.ByUID(uid)
+	if !ok {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	options, session, err := wa.BeginRegistration(&dfUser{user})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	passkeySessionStore.put("reg:"+uid, session)
+	writeJSON(w, options)
+}
+
+func (m *Manager) passkeyRegisterFinish(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
+	uid := r.URL.Query().Get("uid")
+	user, ok := m.store.ByUID(uid)
+	if !ok {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	session, ok := passkeySessionStore.get("reg:" + uid)
+	if !ok {
+		http.Error(w, "no registration in progress", http.StatusBadRequest)
+		return
+	}
+	parsedResponse, err := protocol.ParseCredentialCreationResponseBody(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	credential, err := wa.CreateCredential(&dfUser{user}, *session, parsedResponse)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	passkeySessionStore.delete("reg:" + uid)
+
+	newCred := PasskeyCredential{
+		ID:        encodeBase64URL(credential.ID),
+		PublicKey: encodeBase64URL(credential.PublicKey),
+		AAGUID:    encodeBase64URL(credential.Authenticator.AAGUID),
+		SignCount: credential.Authenticator.SignCount,
+	}
+	updated := append(user.Passkeys, newCred)
+	if err := m.store.UpdatePasskeys(uid, updated); err != nil {
+		log.Printf("save passkey: %v", err)
+		http.Error(w, "save error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (m *Manager) passkeyLoginBegin(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
+	// Discoverable credentials: no username needed; browser presents stored keys.
+	options, session, err := wa.BeginDiscoverableLogin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	passkeySessionStore.put("login", session)
+	writeJSON(w, options)
+}
+
+func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa *webauthn.WebAuthn) {
+	session, ok := passkeySessionStore.get("login")
+	if !ok {
+		http.Error(w, "no login in progress", http.StatusBadRequest)
+		return
+	}
+	parsedResponse, err := protocol.ParseCredentialRequestResponseBody(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Discoverable login: find the user by credential ID returned in the response.
+	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
+		uid := string(userHandle)
+		user, ok := m.store.ByUID(uid)
+		if !ok {
+			return nil, protocol.ErrBadRequest.WithDetails("user not found")
+		}
+		return &dfUser{user}, nil
+	}
+
+	credential, err := wa.ValidateDiscoverableLogin(handler, *session, parsedResponse)
+	if err != nil {
+		http.Error(w, "authentication failed", http.StatusUnauthorized)
+		return
+	}
+	passkeySessionStore.delete("login")
+
+	// Update sign count in storage.
+	uid := string(parsedResponse.Response.UserHandle)
+	user, _ := m.store.ByUID(uid)
+	for i, c := range user.Passkeys {
+		id, _ := decodeBase64URL(c.ID)
+		if string(id) == string(credential.ID) {
+			user.Passkeys[i].SignCount = credential.Authenticator.SignCount
+			break
+		}
+	}
+	_ = m.store.UpdatePasskeys(uid, user.Passkeys)
+
+	m.setSession(w, uid)
+	writeJSON(w, map[string]string{"status": "ok", "redirect": "/play"})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}

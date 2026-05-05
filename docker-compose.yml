@@ -1,0 +1,26 @@
+version: "3.9"
+
+# This compose file manages the session manager only.
+# DF game containers are spawned dynamically by the session manager via the Docker socket.
+
+services:
+  session-manager:
+    build: ./session-manager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # needed to spawn game containers
+      - /srv/df/users:/srv/df/users                   # save volumes live here
+      - ./session-manager/config.yml:/app/config.yml:ro
+      - ./session-manager/users.yml:/app/users.yml
+      - ./web:/app/web:ro
+    environment:
+      LISTEN: "0.0.0.0:8080"
+    networks:
+      - df_internal
+
+networks:
+  df_internal:
+    driver: bridge
+    internal: true  # no external internet access for containers on this network

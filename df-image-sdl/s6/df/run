@@ -1,0 +1,8 @@
+#!/bin/sh
+# Wait for Xvfb and VNC to be ready before launching DF.
+until xdpyinfo -display :0 >/dev/null 2>&1; do sleep 0.2; done
+until nc -z 127.0.0.1 5900 2>/dev/null; do sleep 0.3; done
+
+export DISPLAY=:0
+cd /opt/df
+exec ./dwarfort 2>&1

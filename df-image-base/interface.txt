@@ -1,0 +1,15 @@
+# DF Classic interface.txt — keybind overrides to avoid browser-stolen keys.
+#
+# Keys browsers commonly steal even in fullscreen without Keyboard Lock:
+#   Ctrl+W  (close tab)  → remap DF uses of Ctrl+W
+#   Ctrl+T  (new tab)    → DF doesn't use this by default
+#   Ctrl+N  (new window) → DF doesn't use this by default
+#   F5      (refresh)    → remap
+#
+# DF's default Ctrl+W is "move cursor word left" in some contexts.
+# Remap to Ctrl+Left (which xterm.js passes cleanly).
+#
+# Most DF binds are single letters or Shift+letter, unaffected by browsers.
+# This file is intentionally minimal — only override what's actually broken.
+
+# (Add specific [BIND:...] overrides here as issues are discovered during testing.)
