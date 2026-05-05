@@ -33,7 +33,7 @@ func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 		"--name", fmt.Sprintf("df-%s", uid),
 		"--network", cfg.Network,
 		"--cpus", "1.0",
-		"--memory", "1g",
+		"--memory", "4g",
 		"--pids-limit", "256",
 		// --read-only is intentionally omitted: DF writes errorlog.txt and
 		// gamelog.txt to its working directory (/opt/df) on every run.
