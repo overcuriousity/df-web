@@ -46,5 +46,11 @@ RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/'             /opt/df/data/in
  && sed -i 's/^\[INITIAL_SAVE:.*\]/[INITIAL_SAVE:YES]/'          /opt/df/data/init/d_init_default.txt \
  && sed -i 's/^\[AUTOBACKUP:.*\]/[AUTOBACKUP:YES]/'              /opt/df/data/init/d_init_default.txt
 
+# DF Classic reads init.txt and d_init.txt; the _default files are only
+# templates copied on first run. Bake the patched copies in directly so our
+# settings are authoritative regardless of which file DF picks up.
+RUN cp /opt/df/data/init/init_default.txt   /opt/df/data/init/init.txt \
+ && cp /opt/df/data/init/d_init_default.txt /opt/df/data/init/d_init.txt
+
 VOLUME ["/save"]
 WORKDIR /opt/df
