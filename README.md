@@ -15,7 +15,6 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 
 - Linux server with Docker ≥ 24 and Docker Compose v2
 - [Dwarf Fortress Classic](https://www.bay12games.com/dwarves/) Linux build (not included — see below)
-- `novnc` package installed on the **host** (for SDL mode): `apt install novnc`
 - A reverse proxy (nginx, Caddy, etc.) in front handling TLS — this service binds to `127.0.0.1:8080`
 
 ## Quick Start
@@ -69,8 +68,6 @@ docker compose up -d
 
 Point your reverse proxy at `http://127.0.0.1:8080`.
 
-> **Podman**: the session manager auto-detects Podman when Docker is not in PATH, or when `CONTAINER_RUNTIME=podman` is set. Ensure the Podman socket is running: `systemctl --user start podman.socket`.
-
 ## Configuration
 
 `session-manager/config.yml`:
@@ -79,7 +76,6 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 |-----|---------|-------------|
 | `listen` | `127.0.0.1:8080` | Address the session manager binds to |
 | `web_dir` | `../web` | Path to the `web/` directory |
-| `novnc_dir` | `/usr/share/novnc` | Path to noVNC static files on the host |
 | `saves_root` | `/srv/df/users` | Root directory for per-user save volumes |
 | `image_sdl` | `df-image-sdl` | Docker image name for SDL mode |
 | `docker_network` | `df_internal` | Docker network for game containers |

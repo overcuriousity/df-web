@@ -15,7 +15,6 @@ services:
       - ./session-manager/config.yml:/app/config.yml:ro
       - ./session-manager/users.yml:/app/users.yml
       - ./web:/app/web:ro
-      - /usr/share/novnc:/usr/share/novnc:ro          # noVNC static client files
     environment:
       LISTEN: "0.0.0.0:8080"
     networks:

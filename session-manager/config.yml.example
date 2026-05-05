@@ -3,7 +3,6 @@
 
 listen: "127.0.0.1:8080"
 web_dir: "../web"
-novnc_dir: "/usr/share/novnc"   # or wherever noVNC is installed on the host
 saves_root: "/srv/df/users"
 
 image_sdl:  "df-image-sdl"
