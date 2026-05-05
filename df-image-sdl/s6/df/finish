@@ -1,6 +1,12 @@
 #!/bin/sh
-# DF exited. Tell s6-svscan to bring the whole supervision tree down so the
-# container stops instead of silently restarting dwarfort. Without this, an
-# OOM-kill or segfault inside DF would loop forever and look to the user like
-# the game "crashed back to the title screen".
-exec s6-svscanctl -t /etc/s6
+# DF exited. Bring the container down instead of letting s6 silently respawn
+# dwarfort — without this, a crash or OOM-kill loops forever and looks like
+# "back to the title screen", and quit-save never runs.
+#
+# Signal PID 1 (s6-svscan) directly with SIGTERM; svscanctl -t races with
+# s6-supervise's restart logic and we observed multiple restarts slipping
+# through before svscan actually shut things down.
+kill -TERM 1
+# Block long enough that s6-supervise won't restart `run` before svscan's
+# teardown reaches us.
+sleep 60

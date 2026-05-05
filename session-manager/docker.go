@@ -53,8 +53,9 @@ func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 
 // dockerStop sends SIGTERM to the container (triggers the quit-save script) then removes it.
 func dockerStop(id string) error {
-	// --time=15 gives the container 15 s after SIGTERM before SIGKILL.
-	if err := runDockerNoOut("stop", "--time=15", id); err != nil {
+	// --time=45 gives s6 → df/run trap → quit-sdl.sh → DF's save flow time
+	// to finish writing the world to disk before SIGKILL.
+	if err := runDockerNoOut("stop", "--time=45", id); err != nil {
 		return err
 	}
 	return runDockerNoOut("rm", "-f", id)

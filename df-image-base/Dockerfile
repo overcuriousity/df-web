@@ -34,8 +34,17 @@ COPY tilesets/ /opt/df/data/art/
 RUN sed -i 's/^\[WINDOWED:.*\]/[WINDOWED:YES]/' /opt/df/data/init/init_default.txt \
  && sed -i 's/^\[SOUND:.*\]/[SOUND:YES]/'       /opt/df/data/init/init_default.txt
 
-# Set seasonal autosave in d_init_default.txt.
-RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/' /opt/df/data/init/d_init_default.txt
+# Persistence settings in d_init_default.txt.
+# AUTOSAVE:SEASONAL  — write every season change.
+# AUTOSAVE_PAUSE:YES — also write whenever the user pauses; cheap insurance
+#                     against an OOM-kill or container restart wiping a fortress.
+# INITIAL_SAVE:YES   — write the world to disk immediately after embark, so a
+#                     crash before the first season change doesn't lose everything.
+# AUTOBACKUP:YES     — keep a "-prev" copy of each save.
+RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/'             /opt/df/data/init/d_init_default.txt \
+ && sed -i 's/^\[AUTOSAVE_PAUSE:.*\]/[AUTOSAVE_PAUSE:YES]/'      /opt/df/data/init/d_init_default.txt \
+ && sed -i 's/^\[INITIAL_SAVE:.*\]/[INITIAL_SAVE:YES]/'          /opt/df/data/init/d_init_default.txt \
+ && sed -i 's/^\[AUTOBACKUP:.*\]/[AUTOBACKUP:YES]/'              /opt/df/data/init/d_init_default.txt
 
 VOLUME ["/save"]
 WORKDIR /opt/df
