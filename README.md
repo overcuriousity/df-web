@@ -2,11 +2,18 @@
 
 Play Dwarf Fortress Classic in a browser with session persistence, multi-user support, and three auth methods.
 
+> **Dwarf Fortress is the work of [Bay 12 Games](https://www.bay12games.com/dwarves/).**
+> If you enjoy this wrapper, please buy the game on Steam or
+> [donate directly to Bay 12](https://www.bay12games.com/support.html). Two
+> decades of one of the deepest games ever made.
+
 ## Features
 
 - **SDL render mode** — full graphics via noVNC (tilesets, mouse support).
 - **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC (shown only when configured).
 - **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. On idle timeout the game is saved before the container stops.
+- **Idle warning + keepalive** — `/play` shows a live "time until disconnect" chip and pops a warning dialog with a one-click "keep playing" button before the idle reaper fires.
+- **Hot save snapshot** — `/account` has a "Snapshot saves" button that downloads a tar.gz of the user's save dir without stopping the running game container, alongside the existing stop-and-export flow.
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
 - **Admin-managed tilesets** — baked into the container image; no remote filesystem access for players.

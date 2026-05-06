@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -263,35 +264,17 @@ func (m *Manager) reconcile() {
 	dockerRemoveExited()
 }
 
-// handleAccountExport stops the user's active container (flushing saves via the
-// quit-save sequence) and streams their entire save directory as a tar.gz download.
-func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
-	uid := uidFromContext(r.Context())
+// streamSavesTarball writes the user's save directory to w as a gzipped tar.
+// Caller is responsible for setting Content-Type / Content-Disposition before
+// the first byte is written. Returns nil if the directory does not exist
+// (after writing a 404 to w) so callers can return without further handling.
+func (m *Manager) streamSavesTarball(w http.ResponseWriter, uid string) {
 	saveDir := filepath.Join(m.cfg.SavesRoot, uid, "save")
-
-	// Quiesce the active container so DF flushes saves before we tarball.
-	m.mu.Lock()
-	ci, hasContainer := m.containers[uid]
-	if hasContainer {
-		delete(m.containers, uid)
-	}
-	m.mu.Unlock()
-
-	if hasContainer {
-		log.Printf("export: stopping container %s for user %s (save flush)", ci.id[:12], uid)
-		if err := dockerStop(ci.id); err != nil {
-			log.Printf("export: stop container for user %s: %v", uid, err)
-		}
-	}
 
 	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
 		http.Error(w, "No saves to export yet — play a game first.", http.StatusNotFound)
 		return
 	}
-
-	filename := fmt.Sprintf("df-%s-%s.tar.gz", uid, time.Now().Format("2006-01-02"))
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
@@ -333,6 +316,111 @@ func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	if err := gz.Close(); err != nil {
 		log.Printf("export: gzip close for user %s: %v", uid, err)
 	}
+}
+
+// handleAccountExport stops the user's active container (flushing saves via the
+// quit-save sequence) and streams their entire save directory as a tar.gz download.
+func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	// Quiesce the active container so DF flushes saves before we tarball.
+	m.mu.Lock()
+	ci, hasContainer := m.containers[uid]
+	if hasContainer {
+		delete(m.containers, uid)
+	}
+	m.mu.Unlock()
+
+	if hasContainer {
+		log.Printf("export: stopping container %s for user %s (save flush)", ci.id[:12], uid)
+		if err := dockerStop(ci.id); err != nil {
+			log.Printf("export: stop container for user %s: %v", uid, err)
+		}
+	}
+
+	filename := fmt.Sprintf("df-%s-%s.tar.gz", uid, time.Now().Format("2006-01-02"))
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	m.streamSavesTarball(w, uid)
+}
+
+// handleAccountSnapshot streams the user's save directory as a tar.gz without
+// stopping the running container. DF writes saves atomically (temp dir +
+// rename), so a snapshot taken mid-play captures the most recent completed
+// save; the small window during a save's rename is the only risk and the
+// user can simply re-snapshot.
+func (m *Manager) handleAccountSnapshot(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	ci, hasContainer := m.containers[uid]
+	m.mu.Unlock()
+	if hasContainer {
+		log.Printf("snapshot: live snapshot for user %s (container %s still running)", uid, ci.id[:12])
+	}
+
+	filename := fmt.Sprintf("df-%s-%s-snapshot.tar.gz", uid, time.Now().Format("2006-01-02"))
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	m.streamSavesTarball(w, uid)
+}
+
+// handleSessionStatus returns idle / timeout info for the caller's container
+// as JSON. Read-only — never bumps lastSeen, so polling is safe.
+func (m *Manager) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	type resp struct {
+		Active             bool  `json:"active"`
+		IdleSeconds        int64 `json:"idle_seconds"`
+		IdleTimeoutSeconds int64 `json:"idle_timeout_seconds"`
+		SecondsUntilReap   int64 `json:"seconds_until_reap"`
+	}
+
+	timeout := int64(m.cfg.IdleTimeout / time.Second)
+
+	m.mu.Lock()
+	ci, ok := m.containers[uid]
+	var idle int64
+	if ok {
+		idle = int64(time.Since(ci.lastSeen) / time.Second)
+	}
+	m.mu.Unlock()
+
+	out := resp{
+		Active:             ok,
+		IdleTimeoutSeconds: timeout,
+	}
+	if ok {
+		out.IdleSeconds = idle
+		out.SecondsUntilReap = timeout - idle
+		if out.SecondsUntilReap < 0 {
+			out.SecondsUntilReap = 0
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleSessionKeepalive bumps lastSeen for the caller's container, extending
+// the idle window by IdleTimeout. Returns 204 on success, 409 if the user
+// has no active container so the frontend can show "session ended" UX.
+func (m *Manager) handleSessionKeepalive(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	c, ok := m.containers[uid]
+	if ok {
+		c.lastSeen = time.Now()
+	}
+	m.mu.Unlock()
+
+	if !ok {
+		http.Error(w, "no active session", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // idleReaper periodically stops containers that have been idle too long.

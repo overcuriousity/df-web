@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,8 +26,19 @@
                      border-bottom: 1px solid #2a2420; }
   .passkey-list li:last-child { border-bottom: none; }
   #enroll-status { font-size: 0.85rem; margin-top: 0.8rem; min-height: 1.2em; }
+  #snapshot-status { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
+  .hint { font-size: 0.75rem; color: #666; margin: -0.4rem 0 0.8rem 0; }
   .ok  { color: #70c070; }
   .err { color: #c06060; }
+  .bay12 { margin-top: 1.5rem; font-size: 0.8rem; color: #888; text-align: center; max-width: 420px; }
+  .bay12 a { color: #8b7355; text-decoration: none; }
+  .bay12 a:hover { color: #c8a870; }
+  .bay12-support {
+    display: inline-block; margin-top: 0.5rem; padding: 0.4rem 0.8rem;
+    background: #3a2818; border: 1px solid #c8a870; border-radius: 3px;
+    color: #c8a870 !important; text-decoration: none; letter-spacing: 0.05em;
+  }
+  .bay12-support:hover { background: #5a3a20; color: #f0d090 !important; }
 </style>
 </head>
 <body>
@@ -53,9 +64,18 @@
 
   <hr class="divider">
 
+  <h2>[ Saves ]</h2>
+
+  <button class="btn" type="button" onclick="snapshotSaves()">
+    &#128247; Snapshot saves (game keeps running)
+  </button>
+  <p class="hint">Captures the latest on-disk save. For the freshest copy, save in-game first.</p>
+  <p id="snapshot-status"></p>
+
   <a class="btn" href="/account/export"
-     onclick="return confirm('This will end your active game session (your progress is saved first) and download all your saves as a tar.gz archive. Continue?');">
-    &#11015; Download my data
+     onclick="return confirm('This will END your active game session (your progress is saved first) and download all your saves as a tar.gz archive. For a copy without ending your session, use Snapshot instead. Continue?');"
+     style="border-color:#a06060;color:#c08080">
+    &#9209; Stop session and download all saves
   </a>
 
   <hr class="divider">
@@ -63,6 +83,14 @@
   <a class="btn" href="/play">&#9654; Back to game</a>
   <a class="btn" href="/auth/logout" style="border-color:#666;color:#888;">Sign out</a>
 </div>
+
+<p class="bay12">
+  Dwarf Fortress is the work of
+  <a href="https://www.bay12games.com/dwarves/" target="_blank" rel="noopener">Bay 12 Games</a>.
+  If you enjoy it, please support them &mdash; the game is paid on Steam and Bay 12 also takes donations.<br>
+  <strong><a class="bay12-support" href="https://www.bay12games.com/support.html"
+     target="_blank" rel="noopener">&#9733; Buy the game / donate to Bay 12 &#9733;</a></strong>
+</p>
 
 <script src="/static/webauthn.js"></script>
 <script>
@@ -97,6 +125,37 @@ async function enrollPasskey() {
   } catch (e) {
     status.className = 'err';
     status.textContent = 'Registration failed: ' + e.message;
+  }
+}
+
+async function snapshotSaves() {
+  const status = document.getElementById('snapshot-status');
+  status.className = '';
+  status.textContent = 'Preparing snapshot…';
+  try {
+    const r = await fetch('/account/snapshot', { method: 'POST' });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(text || ('HTTP ' + r.status));
+    }
+    const blob = await r.blob();
+    let filename = 'df-snapshot.tar.gz';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    if (m) filename = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status.className = 'ok';
+    status.textContent = 'Downloaded ' + filename;
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Snapshot failed: ' + e.message;
   }
 }
 </script>
