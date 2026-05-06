@@ -2,7 +2,7 @@
 # Each entry maps one player to their auth credentials.
 #
 # Provision a new user:  ../scripts/provision-user.sh <uid> "Display Name"
-# That creates /srv/df/users/<uid>/save/, appends an entry here, and prints the access key.
+# That creates /srv/df/users/<uid>/{data,config}/, appends an entry here, and prints the access key.
 #
 # After adding users to a running deployment, reload without restarting:
 #   docker compose kill -s SIGHUP session-manager

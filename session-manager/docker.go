@@ -23,27 +23,53 @@ func containerRuntime() string {
 	return "docker"
 }
 
-// ensureSaveDir creates the per-user save directory on the host with ownership
-// 1000:1000 (DF's uid inside the container) and mode 0700. It is idempotent and
-// corrects directories that Docker may have auto-created as root:root when the
-// bind-mount source path was missing.
-func ensureSaveDir(saveDir string) error {
-	if err := os.MkdirAll(saveDir, 0o700); err != nil {
-		return err
+// Per-user host layout (under cfg.SavesRoot/<uid>/):
+//   data/    → bind-mounted onto $HOME/.local/share/Bay 12 Games/Dwarf Fortress
+//              inside the container. DF writes saves here.
+//   config/  → bind-mounted onto $HOME/.config/Bay 12 Games/Dwarf Fortress.
+//              DF writes user-modified init/keybinding files here.
+const (
+	containerDataDir   = "/root/.local/share/Bay 12 Games/Dwarf Fortress"
+	containerConfigDir = "/root/.config/Bay 12 Games/Dwarf Fortress"
+)
+
+// userDataDir returns the per-user host directory holding DF save data.
+func userDataDir(savesRoot, uid string) string {
+	return filepath.Join(savesRoot, uid, "data")
+}
+
+// userConfigDir returns the per-user host directory holding DF config/settings.
+func userConfigDir(savesRoot, uid string) string {
+	return filepath.Join(savesRoot, uid, "config")
+}
+
+// ensureUserDirs creates the per-user data + config directories on the host
+// with ownership 1000:1000 and mode 0700. Idempotent. Run before every
+// container spawn so Docker can never silently auto-create a missing source
+// path as root:root.
+func ensureUserDirs(savesRoot, uid string) error {
+	for _, dir := range []string{userDataDir(savesRoot, uid), userConfigDir(savesRoot, uid)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chown(dir, 1000, 1000); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
 	}
-	if err := os.Chown(saveDir, 1000, 1000); err != nil {
-		return err
-	}
-	return os.Chmod(saveDir, 0o700)
+	return nil
 }
 
 // dockerRun starts a DF container for the given user and returns the container ID.
 // The container is reachable at df-<uid>:<containerPort> on cfg.Network.
 func dockerRun(cfg *Config, uid, image string) (id string, err error) {
-	saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
-	if err := ensureSaveDir(saveDir); err != nil {
-		return "", fmt.Errorf("ensure save dir %s: %w", saveDir, err)
+	if err := ensureUserDirs(cfg.SavesRoot, uid); err != nil {
+		return "", fmt.Errorf("ensure user dirs for %s: %w", uid, err)
 	}
+	dataDir := userDataDir(cfg.SavesRoot, uid)
+	configDir := userConfigDir(cfg.SavesRoot, uid)
 	name := fmt.Sprintf("df-%s", uid)
 
 	// Remove any stopped container holding this name (e.g. one the s6 finish
@@ -65,7 +91,8 @@ func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 		// Security boundary is the container itself, network isolation, and
 		// the per-user bind-mount for saves.
 		"--tmpfs", "/tmp:size=64m",
-		"--mount", fmt.Sprintf("type=bind,source=%s,target=/opt/df/data/save", saveDir),
+		"--mount", fmt.Sprintf("type=bind,source=%s,target=%s", dataDir, containerDataDir),
+		"--mount", fmt.Sprintf("type=bind,source=%s,target=%s", configDir, containerConfigDir),
 		image,
 	}
 

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 )
 
@@ -26,14 +25,13 @@ func main() {
 	}
 	log.Printf("saves root: %s", cfg.SavesRoot)
 
-	// Ensure every known user has a correctly-owned save directory. This is
-	// idempotent and corrects root:root auto-creates from Docker's bind-mount
+	// Ensure every known user has correctly-owned data + config directories.
+	// Idempotent; corrects root:root auto-creates from Docker's bind-mount
 	// path-creation behaviour.
 	store.mu.RLock()
 	for uid := range store.users {
-		saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
-		if err := ensureSaveDir(saveDir); err != nil {
-			log.Printf("warn: could not ensure save dir for user %s: %v", uid, err)
+		if err := ensureUserDirs(cfg.SavesRoot, uid); err != nil {
+			log.Printf("warn: could not ensure user dirs for %s: %v", uid, err)
 		}
 	}
 	store.mu.RUnlock()

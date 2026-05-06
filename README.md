@@ -63,7 +63,7 @@ sudo install -d -o root -g root -m 0755 /srv/df/users
 ```bash
 cp session-manager/users.yml.example session-manager/users.yml
 
-# Creates /srv/df/users/<uid>/save/, appends the entry to users.yml, and prints the access key.
+# Creates /srv/df/users/<uid>/{data,config}/, appends the entry to users.yml, and prints the access key.
 # Run on the host (not inside any container).
 sudo ./scripts/provision-user.sh alice "Alice"
 
@@ -194,7 +194,9 @@ Browser → (your TLS reverse proxy) → 127.0.0.1:8080
 
 Each game container:
 - Is started on demand, stopped after `idle_timeout` of inactivity
-- Has its own bind-mounted save directory (`/srv/df/users/<uid>/save/`)
+- Has its own bind-mounted save + config directories under `/srv/df/users/<uid>/`:
+  - `data/`   → `~/.local/share/Bay 12 Games/Dwarf Fortress/` (saves, world data)
+  - `config/` → `~/.config/Bay 12 Games/Dwarf Fortress/` (keybindings, init customisations)
 - Is attached only to the internal Docker network (no internet egress)
 - Is limited to 1 CPU / 4 GB RAM / 256 PIDs (DF worldgen on medium worlds can spike past 2 GB)
 

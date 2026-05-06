@@ -264,51 +264,61 @@ func (m *Manager) reconcile() {
 	dockerRemoveExited()
 }
 
-// streamSavesTarball writes the user's save directory to w as a gzipped tar.
+// streamSavesTarball writes the user's data + config directories to w as a
+// gzipped tar. Layout in the archive:
+//
+//	data/...    (DF saves; XDG_DATA_HOME/Bay 12 Games/Dwarf Fortress)
+//	config/...  (DF settings; XDG_CONFIG_HOME/Bay 12 Games/Dwarf Fortress)
+//
 // Caller is responsible for setting Content-Type / Content-Disposition before
-// the first byte is written. Returns nil if the directory does not exist
-// (after writing a 404 to w) so callers can return without further handling.
+// the first byte is written. If neither directory exists or both are empty, a
+// 404 is written and the caller can return.
 func (m *Manager) streamSavesTarball(w http.ResponseWriter, uid string) {
-	saveDir := filepath.Join(m.cfg.SavesRoot, uid, "save")
-
-	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
-		http.Error(w, "No saves to export yet — play a game first.", http.StatusNotFound)
+	userRoot := filepath.Join(m.cfg.SavesRoot, uid)
+	if !hasAnyContent(userRoot) {
+		http.Error(w, "Nothing to export yet — play a game first.", http.StatusNotFound)
 		return
 	}
 
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
-	walkErr := filepath.WalkDir(saveDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+	for _, sub := range []string{"data", "config"} {
+		root := filepath.Join(userRoot, sub)
+		if _, err := os.Stat(root); err != nil {
+			continue
+		}
+		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			hdr, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(userRoot, path)
+			hdr.Name = rel
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
 			return err
+		})
+		if walkErr != nil {
+			log.Printf("export: walk %s for user %s: %v", sub, uid, walkErr)
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		hdr, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(saveDir, path)
-		hdr.Name = rel
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = io.Copy(tw, f)
-		return err
-	})
-	if walkErr != nil {
-		log.Printf("export: walk save dir for user %s: %v", uid, walkErr)
 	}
 	if err := tw.Close(); err != nil {
 		log.Printf("export: tar close for user %s: %v", uid, err)
@@ -316,6 +326,18 @@ func (m *Manager) streamSavesTarball(w http.ResponseWriter, uid string) {
 	if err := gz.Close(); err != nil {
 		log.Printf("export: gzip close for user %s: %v", uid, err)
 	}
+}
+
+// hasAnyContent returns true if userRoot/data or userRoot/config exist and
+// contain at least one entry.
+func hasAnyContent(userRoot string) bool {
+	for _, sub := range []string{"data", "config"} {
+		entries, err := os.ReadDir(filepath.Join(userRoot, sub))
+		if err == nil && len(entries) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // handleAccountExport stops the user's active container (flushing saves via the

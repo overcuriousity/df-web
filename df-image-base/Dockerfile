@@ -19,12 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY df/ /opt/df/
 RUN chmod +x /opt/df/dwarfort
 
-# Save directory is bind-mounted directly at /opt/df/data/save by the session
-# manager. Reset the in-image dir to a clean empty mount point — DF (or its
-# rename/atomic-replace save flow) was bypassing a previous symlink approach
-# and silently writing into the container's writable layer, which is lost on
-# `docker rm`. Mounting at the canonical path eliminates the indirection.
-RUN rm -rf /opt/df/data/save && mkdir -p /opt/df/data/save
+# DF 53.x writes saves and user settings into XDG paths under $HOME, NOT into
+# /opt/df/data/save (which earlier versions used). The session manager
+# bind-mounts the per-user host directory onto these two XDG paths so saves
+# *and* settings (keybindings, init customisations, etc.) survive container
+# removal. We pre-create the parent dirs so the bind mount has an existing
+# target on first start.
+RUN mkdir -p "/root/.local/share/Bay 12 Games/Dwarf Fortress" \
+             "/root/.config/Bay 12 Games/Dwarf Fortress"
 
 # Bake tilesets (admin-managed): copy PNGs into the art directory.
 # Drop PNG files into df-image-base/tilesets/ to include them.
@@ -55,5 +57,4 @@ RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/'             /opt/df/data/in
 RUN cp /opt/df/data/init/init_default.txt   /opt/df/data/init/init.txt \
  && cp /opt/df/data/init/d_init_default.txt /opt/df/data/init/d_init.txt
 
-VOLUME ["/opt/df/data/save"]
 WORKDIR /opt/df

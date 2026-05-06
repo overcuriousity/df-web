@@ -60,12 +60,14 @@ if [ "$ROTATE" = "1" ]; then
 fi
 
 # Default mode: create new user.
-SAVE_DIR="$SAVES_ROOT/$UID_ARG/save"
+USER_ROOT="$SAVES_ROOT/$UID_ARG"
+DATA_DIR="$USER_ROOT/data"      # → /root/.local/share/Bay 12 Games/Dwarf Fortress (saves)
+CONFIG_DIR="$USER_ROOT/config"  # → /root/.config/Bay 12 Games/Dwarf Fortress (settings)
 
-echo "Creating $SAVE_DIR …"
-mkdir -p "$SAVE_DIR"
-chown -R 1000:1000 "$SAVES_ROOT/$UID_ARG"  # DF runs as uid 1000 inside the container.
-chmod 700 "$SAVES_ROOT/$UID_ARG"
+echo "Creating $DATA_DIR and $CONFIG_DIR …"
+mkdir -p "$DATA_DIR" "$CONFIG_DIR"
+chown -R 1000:1000 "$USER_ROOT"
+chmod 700 "$USER_ROOT" "$DATA_DIR" "$CONFIG_DIR"
 
 if grep -q "uid: \"$UID_ARG\"" "$USERS_YML"; then
     echo "Error: uid '$UID_ARG' already exists in $USERS_YML — use --rotate to issue a fresh token." >&2
