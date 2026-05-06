@@ -23,10 +23,27 @@ func containerRuntime() string {
 	return "docker"
 }
 
+// ensureSaveDir creates the per-user save directory on the host with ownership
+// 1000:1000 (DF's uid inside the container) and mode 0700. It is idempotent and
+// corrects directories that Docker may have auto-created as root:root when the
+// bind-mount source path was missing.
+func ensureSaveDir(saveDir string) error {
+	if err := os.MkdirAll(saveDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chown(saveDir, 1000, 1000); err != nil {
+		return err
+	}
+	return os.Chmod(saveDir, 0o700)
+}
+
 // dockerRun starts a DF container for the given user and returns the container ID.
 // The container is reachable at df-<uid>:<containerPort> on cfg.Network.
 func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 	saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
+	if err := ensureSaveDir(saveDir); err != nil {
+		return "", fmt.Errorf("ensure save dir %s: %w", saveDir, err)
+	}
 	name := fmt.Sprintf("df-%s", uid)
 
 	// Remove any stopped container holding this name (e.g. one the s6 finish

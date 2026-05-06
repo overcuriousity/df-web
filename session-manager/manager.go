@@ -1,11 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -256,6 +261,78 @@ func (m *Manager) reconcile() {
 	}
 	m.mu.Unlock()
 	dockerRemoveExited()
+}
+
+// handleAccountExport stops the user's active container (flushing saves via the
+// quit-save sequence) and streams their entire save directory as a tar.gz download.
+func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+	saveDir := filepath.Join(m.cfg.SavesRoot, uid, "save")
+
+	// Quiesce the active container so DF flushes saves before we tarball.
+	m.mu.Lock()
+	ci, hasContainer := m.containers[uid]
+	if hasContainer {
+		delete(m.containers, uid)
+	}
+	m.mu.Unlock()
+
+	if hasContainer {
+		log.Printf("export: stopping container %s for user %s (save flush)", ci.id[:12], uid)
+		if err := dockerStop(ci.id); err != nil {
+			log.Printf("export: stop container for user %s: %v", uid, err)
+		}
+	}
+
+	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
+		http.Error(w, "No saves to export yet — play a game first.", http.StatusNotFound)
+		return
+	}
+
+	filename := fmt.Sprintf("df-%s-%s.tar.gz", uid, time.Now().Format("2006-01-02"))
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+
+	gz := gzip.NewWriter(w)
+	tw := tar.NewWriter(gz)
+
+	walkErr := filepath.WalkDir(saveDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(saveDir, path)
+		hdr.Name = rel
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if walkErr != nil {
+		log.Printf("export: walk save dir for user %s: %v", uid, walkErr)
+	}
+	if err := tw.Close(); err != nil {
+		log.Printf("export: tar close for user %s: %v", uid, err)
+	}
+	if err := gz.Close(); err != nil {
+		log.Printf("export: gzip close for user %s: %v", uid, err)
+	}
 }
 
 // idleReaper periodically stops containers that have been idle too long.

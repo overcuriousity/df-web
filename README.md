@@ -41,31 +41,54 @@ $EDITOR session-manager/config.yml
 
 `cookie_key` must be 64 hex characters: `openssl rand -hex 32`
 
-### 3. Provision users
+### 3. Create the saves root on the host
+
+The directory must exist on a persistent filesystem **before** starting the stack. The session manager will refuse to start if it is missing.
+
+```bash
+sudo install -d -o root -g root -m 0755 /srv/df/users
+```
+
+> **Important:** always create this on the host directly, never via `docker exec` or `docker compose exec`. Commands run inside the session-manager container operate inside that container's filesystem; even with the bind-mount, getting the paths and ownership right is fragile that way.
+
+### 4. Provision users
 
 ```bash
 cp session-manager/users.yml.example session-manager/users.yml
 
-# Creates /srv/df/users/<uid>/save/, appends the entry to users.yml, and prints the access key
+# Creates /srv/df/users/<uid>/save/, appends the entry to users.yml, and prints the access key.
+# Run on the host (not inside any container).
 sudo ./scripts/provision-user.sh alice "Alice"
 
 # Share the printed access key with the user out-of-band (treat it like a password)
 ```
 
-### 4. Build images
+### 5. Build images
 
 ```bash
 docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
 ```
 
-### 5. Run
+### 6. Run
 
 ```bash
 docker compose up -d
 ```
 
 Point your reverse proxy at `http://127.0.0.1:8080`.
+
+## Updating
+
+After pulling new commits, rebuild and redeploy:
+
+```bash
+git pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+Use `--no-cache` whenever Dockerfiles change (including base image layers). Running the old image after a fix to image-layer behaviour (e.g. save directory wiring) will silently keep the bug active.
 
 ## Configuration
 

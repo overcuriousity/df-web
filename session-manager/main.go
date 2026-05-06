@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
 
@@ -18,6 +19,24 @@ func main() {
 	if err != nil {
 		log.Fatalf("users: %v", err)
 	}
+
+	// Verify saves root exists on persistent host storage.
+	if _, err := os.Stat(cfg.SavesRoot); err != nil {
+		log.Fatalf("saves_root %q not found — create it on the host before starting: %v", cfg.SavesRoot, err)
+	}
+	log.Printf("saves root: %s", cfg.SavesRoot)
+
+	// Ensure every known user has a correctly-owned save directory. This is
+	// idempotent and corrects root:root auto-creates from Docker's bind-mount
+	// path-creation behaviour.
+	store.mu.RLock()
+	for uid := range store.users {
+		saveDir := filepath.Join(cfg.SavesRoot, uid, "save")
+		if err := ensureSaveDir(saveDir); err != nil {
+			log.Printf("warn: could not ensure save dir for user %s: %v", uid, err)
+		}
+	}
+	store.mu.RUnlock()
 
 	mgr := newManager(cfg, store)
 	mgr.reconcile()
@@ -49,6 +68,7 @@ func main() {
 	mux.Handle("/play", mgr.requireAuth(http.HandlerFunc(mgr.handlePlay)))
 	mux.Handle("/play/audio", mgr.requireAuth(http.HandlerFunc(mgr.handlePlayAudio)))
 	mux.Handle("/account", mgr.requireAuth(http.HandlerFunc(mgr.handleAccount)))
+	mux.Handle("/account/export", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountExport)))
 
 	// Login page is public; authenticated users are redirected to /play.
 	mux.HandleFunc("/", mgr.handleIndex)
