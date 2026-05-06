@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
 <title>Dwarf Fortress – SDL</title>
@@ -11,18 +11,42 @@
   #toolbar a { color: #8b7355; text-decoration: none; }
   #toolbar a:hover { color: #c8a870; }
   #fs-hint { color: #c8a870; font-size: 0.8rem; }
+  #idle-chip { display: none; font-size: 0.8rem; color: #c8a870; }
+  #idle-chip.warn { color: #c06060; }
   #novnc-frame { flex: 1; width: 100%; border: none; }
   #audio-btn { background: none; border: none; color: #8b7355; cursor: pointer;
                font-family: inherit; font-size: 0.85rem; padding: 0; }
   #audio-btn:hover { color: #c8a870; }
+  #idle-warning { background: #242018; color: #d0c8b0; border: 1px solid #c8a870; border-radius: 4px;
+                  padding: 1.2rem 1.5rem; max-width: 420px; font-family: monospace; }
+  #idle-warning::backdrop { background: rgba(0,0,0,0.7); }
+  #idle-warning h3 { color: #c8a870; font-size: 1rem; margin-bottom: 0.6rem; letter-spacing: 0.05em; }
+  #idle-warning p { font-size: 0.85rem; line-height: 1.4; margin-bottom: 1rem; }
+  #idle-warning .row { display: flex; gap: 0.6rem; }
+  #idle-warning button { flex: 1; padding: 0.6rem 0.8rem; background: #3a3028; color: #d0c8b0;
+                         border: 1px solid #8b7355; border-radius: 3px; cursor: pointer;
+                         font-family: inherit; font-size: 0.9rem; }
+  #idle-warning button.primary { background: #5a4a30; border-color: #c8a870; color: #f0d090; }
+  #idle-warning button:hover { background: #5a4a38; }
+  .bay12-support {
+    display: inline-block; padding: 0.2rem 0.6rem;
+    background: #3a2818; border: 1px solid #c8a870; border-radius: 3px;
+    color: #c8a870 !important; text-decoration: none; letter-spacing: 0.05em;
+    font-size: 0.8rem;
+  }
+  .bay12-support:hover { background: #5a3a20; color: #f0d090 !important; }
 </style>
 </head>
 <body>
 <div id="toolbar">
-  <span>&#9935; Dwarf Fortress</span>
+  <span>&#9935; Dwarf Fortress <span style="color:#666">&middot; by
+    <a href="https://www.bay12games.com/dwarves/" target="_blank" rel="noopener">Bay 12 Games</a></span></span>
   <span id="fs-hint">Press F11 or click &#x26F6; for fullscreen</span>
+  <span id="idle-chip"></span>
   <span style="margin-left:auto; display:flex; gap:1rem; align-items:center">
-    <button id="audio-btn" onclick="toggleAudio()" title="Enable audio">&#128263; Audio off</button>
+    <button id="audio-btn" onclick="toggleAudio()">&#128263; Audio off</button>
+    <a class="bay12-support" href="https://www.bay12games.com/support.html"
+       target="_blank" rel="noopener">&#9733; Buy / donate</a>
     <a href="/account">Account</a>
     <a href="/auth/logout">Logout</a>
   </span>
@@ -34,6 +58,16 @@
 <iframe id="novnc-frame"
         src="/novnc/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&path=/play&resize=scale&show_dot=false&bell=false"
         allowfullscreen></iframe>
+
+<dialog id="idle-warning">
+  <h3>[ Still there? ]</h3>
+  <p>Your game session will end in <span id="idle-warning-secs">?</span> seconds because of inactivity.
+     Your progress will be saved automatically. Stay connected?</p>
+  <div class="row">
+    <button type="button" class="primary" onclick="keepPlaying()">Keep playing</button>
+    <button type="button" onclick="dismissWarning()">Let it end</button>
+  </div>
+</dialog>
 
 <script>
 // Keyboard Lock API — exclusive capture of system keys in fullscreen (Chromium only).
@@ -77,7 +111,80 @@ document.getElementById('novnc-frame').addEventListener('load', () => {
     'Click inside the game, then F11 for fullscreen.';
   // Focus the iframe so keyboard events flow to noVNC immediately.
   document.getElementById('novnc-frame').contentWindow.focus();
+  // First paint resets the idle clock — handy if the user reloaded /play.
+  fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
 });
+
+// ---- Idle countdown + warning -------------------------------------------------
+
+const idleChip = document.getElementById('idle-chip');
+const idleWarning = document.getElementById('idle-warning');
+const idleWarningSecs = document.getElementById('idle-warning-secs');
+const WARNING_THRESHOLD = 120; // seconds — show modal when ≤2 min left
+let pollTimer = null;
+let warningDismissed = false;
+
+function fmtRemaining(s) {
+  if (s <= 0) return 'session ended';
+  if (s < 60) return s + 's left';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (s < 300) return '⚠ ' + m + 'm ' + r + 's left';
+  return '⌛ ' + m + 'm left';
+}
+
+async function pollSessionStatus() {
+  try {
+    const r = await fetch('/session/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const s = await r.json();
+    if (!s.active) {
+      idleChip.style.display = 'none';
+      return;
+    }
+    idleChip.style.display = 'inline';
+    idleChip.textContent = fmtRemaining(s.seconds_until_reap);
+    idleChip.classList.toggle('warn', s.seconds_until_reap <= 300);
+
+    if (s.seconds_until_reap <= WARNING_THRESHOLD && !warningDismissed) {
+      idleWarningSecs.textContent = String(s.seconds_until_reap);
+      if (!idleWarning.open) idleWarning.showModal();
+      schedulePoll(5000);
+    } else {
+      if (idleWarning.open) idleWarning.close();
+      schedulePoll(30000);
+    }
+  } catch (_) { /* network blip — next tick will retry */ }
+}
+
+function schedulePoll(ms) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollSessionStatus, ms);
+}
+
+async function keepPlaying() {
+  try { await fetch('/session/keepalive', { method: 'POST' }); } catch (_) {}
+  warningDismissed = false;
+  if (idleWarning.open) idleWarning.close();
+  pollSessionStatus();
+}
+
+function dismissWarning() {
+  warningDismissed = true;
+  if (idleWarning.open) idleWarning.close();
+  schedulePoll(30000);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    pollSessionStatus();
+  } else if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+});
+
+pollSessionStatus();
 </script>
 </body>
 </html>

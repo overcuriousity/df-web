@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,6 +30,15 @@
   .divider { border: none; border-top: 1px solid #3a3028; margin: 1.2rem 0; }
   #passkey-status { font-size: 0.8rem; color: #888; margin-top: 0.6rem; min-height: 1.2em; }
   .error { color: #c06060; font-size: 0.85rem; margin-top: 1rem; min-height: 1.2em; }
+  .bay12 { margin-top: 1.5rem; font-size: 0.8rem; color: #888; text-align: center; max-width: 380px; }
+  .bay12 a { color: #8b7355; text-decoration: none; }
+  .bay12 a:hover { color: #c8a870; }
+  .bay12-support {
+    display: inline-block; margin-top: 0.5rem; padding: 0.4rem 0.8rem;
+    background: #3a2818; border: 1px solid #c8a870; border-radius: 3px;
+    color: #c8a870 !important; text-decoration: none; letter-spacing: 0.05em;
+  }
+  .bay12-support:hover { background: #5a3a20; color: #f0d090 !important; }
 </style>
 </head>
 <body>
@@ -41,7 +50,7 @@
   <h2>[ Login ]</h2>
 
   <form method="POST" action="/auth/token" autocomplete="off">
-    <label for="key">Access key</label>
+    <div style="font-size:0.8rem;color:#888;margin-bottom:0.4rem">Access key</div>
     <input id="key" name="key" type="password" required autofocus
            spellcheck="false" autocapitalize="off" autocomplete="current-password">
     <button class="btn" type="submit">Sign in</button>
@@ -59,6 +68,14 @@
 
   <div class="error">{{.Reason}}</div>
 </div>
+
+<p class="bay12">
+  Dwarf Fortress is the work of
+  <a href="https://www.bay12games.com/dwarves/" target="_blank" rel="noopener">Bay 12 Games</a>.
+  Two decades of one of the deepest games ever made — please support them.<br>
+  <strong><a class="bay12-support" href="https://www.bay12games.com/support.html"
+     target="_blank" rel="noopener">&#9733; Buy the game / donate to Bay 12 &#9733;</a></strong>
+</p>
 
 <script src="/static/webauthn.js"></script>
 <script>
