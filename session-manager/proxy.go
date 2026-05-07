@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"net"
@@ -29,8 +28,13 @@ func proxyHTTPStream(w http.ResponseWriter, r *http.Request, host string, port i
 }
 
 // proxyWebsocket reverse-proxies the current request to the container's websocket port.
-// onActivity is called on each write to track idle time.
-func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string, port int, onActivity func()) {
+//
+// We deliberately do NOT bump session lastSeen from this proxy. Server→client
+// frames flow continuously whenever DF redraws (water, blinking cursor, etc.),
+// which would mean an idle browser window keeps a session alive forever.
+// "Idle" is defined as no real user input; the frontend posts to
+// /session/keepalive on actual key/mouse activity.
+func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string, port int) {
 	if err := waitPort(host, port, 10*time.Second); err != nil {
 		http.Error(w, "container not ready in time", http.StatusGatewayTimeout)
 		return
@@ -45,27 +49,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string, port in
 		log.Printf("proxy error: %v", err)
 		http.Error(w, "proxy error", http.StatusBadGateway)
 	}
-	proxy.ServeHTTP(&activityWriter{ResponseWriter: w, fn: onActivity}, r)
-}
-
-type activityWriter struct {
-	http.ResponseWriter
-	fn func()
-}
-
-func (a *activityWriter) Write(b []byte) (int, error) {
-	a.fn()
-	return a.ResponseWriter.Write(b)
-}
-
-func (a *activityWriter) Flush() {
-	if f, ok := a.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (a *activityWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return a.ResponseWriter.(http.Hijacker).Hijack()
+	proxy.ServeHTTP(w, r)
 }
 
 func waitPort(host string, port int, timeout time.Duration) error {

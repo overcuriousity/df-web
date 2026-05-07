@@ -17,17 +17,17 @@
   #audio-btn { background: none; border: none; color: #8b7355; cursor: pointer;
                font-family: inherit; font-size: 0.85rem; padding: 0; }
   #audio-btn:hover { color: #c8a870; }
-  #idle-warning { background: #242018; color: #d0c8b0; border: 1px solid #c8a870; border-radius: 4px;
+  #idle-warning, #session-ended { background: #242018; color: #d0c8b0; border: 1px solid #c8a870; border-radius: 4px;
                   padding: 1.2rem 1.5rem; max-width: 420px; font-family: monospace; }
-  #idle-warning::backdrop { background: rgba(0,0,0,0.7); }
-  #idle-warning h3 { color: #c8a870; font-size: 1rem; margin-bottom: 0.6rem; letter-spacing: 0.05em; }
-  #idle-warning p { font-size: 0.85rem; line-height: 1.4; margin-bottom: 1rem; }
-  #idle-warning .row { display: flex; gap: 0.6rem; }
-  #idle-warning button { flex: 1; padding: 0.6rem 0.8rem; background: #3a3028; color: #d0c8b0;
+  #idle-warning::backdrop, #session-ended::backdrop { background: rgba(0,0,0,0.7); }
+  #idle-warning h3, #session-ended h3 { color: #c8a870; font-size: 1rem; margin-bottom: 0.6rem; letter-spacing: 0.05em; }
+  #idle-warning p, #session-ended p { font-size: 0.85rem; line-height: 1.4; margin-bottom: 1rem; }
+  #idle-warning .row, #session-ended .row { display: flex; gap: 0.6rem; }
+  #idle-warning button, #session-ended button { flex: 1; padding: 0.6rem 0.8rem; background: #3a3028; color: #d0c8b0;
                          border: 1px solid #8b7355; border-radius: 3px; cursor: pointer;
                          font-family: inherit; font-size: 0.9rem; }
-  #idle-warning button.primary { background: #5a4a30; border-color: #c8a870; color: #f0d090; }
-  #idle-warning button:hover { background: #5a4a38; }
+  #idle-warning button.primary, #session-ended button.primary { background: #5a4a30; border-color: #c8a870; color: #f0d090; }
+  #idle-warning button:hover, #session-ended button:hover { background: #5a4a38; }
   .bay12-support {
     display: inline-block; padding: 0.2rem 0.6rem;
     background: #3a2818; border: 1px solid #c8a870; border-radius: 3px;
@@ -55,9 +55,22 @@
 <audio id="game-audio" style="display:none"></audio>
 
 <!-- noVNC served by websockify in the container, proxied through /play. -->
+<!-- reconnect is intentionally OFF: an unattended tab must not keep the
+     server-side container warm forever by re-spawning it on each reaper kill.
+     If the WS drops we surface the "session ended" overlay and let the user
+     opt back in. -->
 <iframe id="novnc-frame"
-        src="/novnc/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&path=/play&resize=scale&show_dot=false&bell=false"
+        src="/novnc/vnc.html?autoconnect=true&reconnect=false&path=/play&resize=scale&show_dot=false&bell=false"
         allowfullscreen></iframe>
+
+<dialog id="session-ended">
+  <h3>[ Session ended ]</h3>
+  <p>Your game session has been put to sleep after a long period of inactivity.
+     Your progress was saved. Click below to start a fresh session.</p>
+  <div class="row">
+    <button type="button" class="primary" onclick="resumeSession()">Resume</button>
+  </div>
+</dialog>
 
 <dialog id="idle-warning">
   <h3>[ Still there? ]</h3>
@@ -106,20 +119,47 @@ function toggleAudio() {
   }
 }
 
-document.getElementById('novnc-frame').addEventListener('load', () => {
+// Track the last real user input so we only bump the idle timer when
+// someone is actually playing. Server-side proxy no longer counts frames.
+let lastInputAt = Date.now();
+function noteInput() { lastInputAt = Date.now(); }
+
+const novncFrame = document.getElementById('novnc-frame');
+novncFrame.addEventListener('load', () => {
   document.getElementById('fs-hint').textContent =
     'Click inside the game, then F11 for fullscreen.';
   // Focus the iframe so keyboard events flow to noVNC immediately.
-  document.getElementById('novnc-frame').contentWindow.focus();
+  novncFrame.contentWindow.focus();
   // First paint resets the idle clock — handy if the user reloaded /play.
   fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
+  noteInput();
+
+  // Same-origin iframe: hook real input events so we know when the user
+  // is doing something, separate from raw VNC frames flowing back.
+  try {
+    const doc = novncFrame.contentDocument;
+    if (doc) {
+      ['keydown', 'mousedown', 'wheel', 'touchstart'].forEach(ev =>
+        doc.addEventListener(ev, noteInput, { capture: true, passive: true }));
+    }
+  } catch (_) { /* cross-origin shouldn't happen, but don't break if it does */ }
 });
+
+// Drive keepalive from the client on real input. If the user has touched
+// anything in the last 90 s, refresh the lease every 60 s; otherwise stay
+// quiet and let the server reap.
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - lastInputAt > 90_000) return;
+  fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
+}, 60_000);
 
 // ---- Idle countdown + warning -------------------------------------------------
 
 const idleChip = document.getElementById('idle-chip');
 const idleWarning = document.getElementById('idle-warning');
 const idleWarningSecs = document.getElementById('idle-warning-secs');
+const sessionEnded = document.getElementById('session-ended');
 const WARNING_THRESHOLD = 120; // seconds — show modal when ≤2 min left
 let pollTimer = null;
 let warningDismissed = false;
@@ -140,8 +180,14 @@ async function pollSessionStatus() {
     const s = await r.json();
     if (!s.active) {
       idleChip.style.display = 'none';
+      // No live container — server reaped us, or we never had one.
+      // Surface the resume overlay so the user can opt back in deliberately.
+      if (idleWarning.open) idleWarning.close();
+      if (!sessionEnded.open) sessionEnded.showModal();
+      schedulePoll(15000);
       return;
     }
+    if (sessionEnded.open) sessionEnded.close();
     idleChip.style.display = 'inline';
     idleChip.textContent = fmtRemaining(s.seconds_until_reap);
     idleChip.classList.toggle('warn', s.seconds_until_reap <= 300);
@@ -173,6 +219,12 @@ function dismissWarning() {
   warningDismissed = true;
   if (idleWarning.open) idleWarning.close();
   schedulePoll(30000);
+}
+
+// Reload the page: /play (non-WS) is the one path that spawns a fresh
+// container, so a full reload is the cleanest way to resume after a reap.
+function resumeSession() {
+  window.location.reload();
 }
 
 document.addEventListener('visibilitychange', () => {

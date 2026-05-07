@@ -25,7 +25,14 @@ type containerInfo struct {
 	host     string // container hostname on df_internal, e.g. "df-alice"
 	port     int    // internal port (websockify, typically 6080)
 	lastSeen time.Time
+	// stopping is set by the idle reaper before it issues docker stop.
+	// While true, ensureContainer must refuse to spawn for this uid so the
+	// graceful quit-save isn't interrupted by a parallel docker rm -f.
+	stopping bool
 }
+
+// errSessionEnding is returned by ensureContainer while the reaper is mid-stop.
+var errSessionEnding = fmt.Errorf("session is ending — try again in a moment")
 
 type Manager struct {
 	cfg       *Config
@@ -143,26 +150,36 @@ func (m *Manager) handlePlay(w http.ResponseWriter, r *http.Request) {
 	// DF 53.x is SDL2-only (no terminal/text mode). Mode is always "sdl".
 	mode := "sdl"
 
-	// For non-websocket requests (first page load) serve the SDL client HTML.
+	// For non-websocket requests (first page load) we eagerly ensure a
+	// container is up, then serve the SDL client HTML. Spawning here — and
+	// NOT on the websocket — means a tab left open after the reaper fires
+	// can no longer auto-resurrect the container via noVNC's reconnect loop.
+	// Only an explicit page (re)load brings a session back.
 	if r.Header.Get("Upgrade") != "websocket" {
+		if _, err := m.ensureContainer(uid, mode); err != nil {
+			log.Printf("play: ensureContainer for %s: %v", uid, err)
+			// Page still loads — frontend polls /session/status and will
+			// show a "session ended" overlay if no container is active.
+		}
 		http.ServeFile(w, r, filepath.Join(m.cfg.WebDir, "play-sdl.html"))
 		return
 	}
 
-	ci, err := m.ensureContainer(uid, mode)
-	if err != nil {
-		http.Error(w, "could not start game session: "+err.Error(), http.StatusServiceUnavailable)
+	// Websocket branch: never spawn here. If there's no live container the
+	// browser gets 410, noVNC stops trying, and the user is shown a resume
+	// overlay. This is what makes idle-reap actually idempotent.
+	m.mu.Lock()
+	ci, ok := m.containers[uid]
+	m.mu.Unlock()
+	if !ok || ci.stopping {
+		http.Error(w, "session ended", http.StatusGone)
 		return
 	}
 
 	// Proxy the websocket to the container's port via df_internal.
-	proxyWebsocket(w, r, ci.host, ci.port, func() {
-		m.mu.Lock()
-		if c, ok := m.containers[uid]; ok && c.id == ci.id {
-			c.lastSeen = time.Now()
-		}
-		m.mu.Unlock()
-	})
+	// Note: lastSeen is bumped by client-driven /session/keepalive (called
+	// from JS on real user input), not by frames flowing the other way.
+	proxyWebsocket(w, r, ci.host, ci.port)
 }
 
 // handlePlayAudio proxies the audio stream from the user's running container.
@@ -188,6 +205,11 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	defer m.mu.Unlock()
 
 	if ci, ok := m.containers[uid]; ok {
+		if ci.stopping {
+			// Reaper is mid-stop. Don't race it with a fresh dockerRun —
+			// the resulting docker rm -f would interrupt DF's quit-save.
+			return nil, errSessionEnding
+		}
 		if dockerIsRunning(ci.id) {
 			ci.lastSeen = time.Now()
 			return ci, nil
@@ -446,6 +468,11 @@ func (m *Manager) handleSessionKeepalive(w http.ResponseWriter, r *http.Request)
 }
 
 // idleReaper periodically stops containers that have been idle too long.
+//
+// The flag-then-stop-then-delete sequence is deliberate: ensureContainer
+// refuses to spawn for a uid whose entry has stopping=true, so a websocket
+// reconnect or page reload during the (up to 45 s) graceful stop cannot
+// race the reaper into issuing docker rm -f and clobbering DF's quit-save.
 func (m *Manager) idleReaper() {
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
@@ -454,12 +481,10 @@ func (m *Manager) idleReaper() {
 		now := time.Now()
 		var toReap []*containerInfo
 		for _, ci := range m.containers {
-			if now.Sub(ci.lastSeen) > m.cfg.IdleTimeout {
+			if !ci.stopping && now.Sub(ci.lastSeen) > m.cfg.IdleTimeout {
+				ci.stopping = true
 				toReap = append(toReap, ci)
 			}
-		}
-		for _, ci := range toReap {
-			delete(m.containers, ci.uid)
 		}
 		m.mu.Unlock()
 
@@ -468,6 +493,12 @@ func (m *Manager) idleReaper() {
 			if err := dockerStop(ci.id); err != nil {
 				log.Printf("idle reap: stop %s: %v", ci.id[:12], err)
 			}
+			m.mu.Lock()
+			// Only forget the entry if it's still the one we just reaped.
+			if cur, ok := m.containers[ci.uid]; ok && cur.id == ci.id {
+				delete(m.containers, ci.uid)
+			}
+			m.mu.Unlock()
 		}
 	}
 }
