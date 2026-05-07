@@ -28,6 +28,12 @@ COPY serve-audio.py /serve-audio.py
 COPY quit-sdl.sh /quit-sdl.sh
 RUN chmod +x /quit-sdl.sh
 
+# Spawn-time hook: copies user-uploaded tilesets into data/art and patches
+# init.txt with the active selection (DF_ACTIVE_TILESET env var). Invoked
+# from s6/df/run before launching DF.
+COPY apply-tilesets.sh /apply-tilesets.sh
+RUN chmod +x /apply-tilesets.sh
+
 # noVNC HTML5 client — Debian ships it at /usr/share/novnc.
 RUN ln -sfn /usr/share/novnc /novnc
 

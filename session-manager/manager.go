@@ -228,7 +228,12 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	image := m.cfg.ImageSDL
 	const vncPort = 6080
 
-	id, err := dockerRun(m.cfg, uid, image)
+	var activeTileset string
+	if u, ok := m.store.ByUID(uid); ok {
+		activeTileset = u.ActiveTileset
+	}
+
+	id, err := dockerRun(m.cfg, uid, image, activeTileset)
 	if err != nil {
 		log.Printf("dockerRun failed for user %s: %v", uid, err)
 		return nil, err
@@ -462,6 +467,40 @@ func (m *Manager) handleSessionKeepalive(w http.ResponseWriter, r *http.Request)
 
 	if !ok {
 		http.Error(w, "no active session", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSessionStop stops the user's active container without exporting saves.
+// Mirrors handleAccountExport's stop sequence (graceful SIGTERM → quit-save →
+// docker rm) so the session ends cleanly. Returns 204 on success, 409 if the
+// user has no active container.
+func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	ci, ok := m.containers[uid]
+	if ok {
+		// Block ensureContainer races during the up-to-45s graceful stop.
+		ci.stopping = true
+		delete(m.containers, uid)
+	}
+	m.mu.Unlock()
+
+	if !ok {
+		http.Error(w, "no active session", http.StatusConflict)
+		return
+	}
+
+	log.Printf("stop: stopping container %s for user %s", ci.id[:12], uid)
+	if err := dockerStop(ci.id); err != nil {
+		log.Printf("stop: stop container for user %s: %v", uid, err)
+		http.Error(w, "stop failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

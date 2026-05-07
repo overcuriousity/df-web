@@ -67,9 +67,12 @@ func main() {
 	mux.Handle("/play/audio", mgr.requireAuth(http.HandlerFunc(mgr.handlePlayAudio)))
 	mux.Handle("/session/status", mgr.requireAuth(http.HandlerFunc(mgr.handleSessionStatus)))
 	mux.Handle("/session/keepalive", mgr.requireAuth(http.HandlerFunc(mgr.handleSessionKeepalive)))
+	mux.Handle("/session/stop", mgr.requireAuth(http.HandlerFunc(mgr.handleSessionStop)))
 	mux.Handle("/account", mgr.requireAuth(http.HandlerFunc(mgr.handleAccount)))
 	mux.Handle("/account/export", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountExport)))
 	mux.Handle("/account/snapshot", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountSnapshot)))
+	mux.Handle("/account/tilesets", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesets)))
+	mux.Handle("/account/tilesets/", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesetItem)))
 
 	// Login page is public; authenticated users are redirected to /play.
 	mux.HandleFunc("/", mgr.handleIndex)

@@ -29,8 +29,9 @@ func containerRuntime() string {
 //   config/  → bind-mounted onto $HOME/.config/Bay 12 Games/Dwarf Fortress.
 //              DF writes user-modified init/keybinding files here.
 const (
-	containerDataDir   = "/root/.local/share/Bay 12 Games/Dwarf Fortress"
-	containerConfigDir = "/root/.config/Bay 12 Games/Dwarf Fortress"
+	containerDataDir     = "/root/.local/share/Bay 12 Games/Dwarf Fortress"
+	containerConfigDir   = "/root/.config/Bay 12 Games/Dwarf Fortress"
+	containerTilesetsDir = "/opt/df/user-tilesets"
 )
 
 // userDataDir returns the per-user host directory holding DF save data.
@@ -43,12 +44,21 @@ func userConfigDir(savesRoot, uid string) string {
 	return filepath.Join(savesRoot, uid, "config")
 }
 
-// ensureUserDirs creates the per-user data + config directories on the host
-// with ownership 1000:1000 and mode 0700. Idempotent. Run before every
-// container spawn so Docker can never silently auto-create a missing source
-// path as root:root.
+// userTilesetDir returns the per-user host directory holding uploaded PNG tilesets.
+func userTilesetDir(savesRoot, uid string) string {
+	return filepath.Join(savesRoot, uid, "tilesets")
+}
+
+// ensureUserDirs creates the per-user data + config + tilesets directories on
+// the host with ownership 1000:1000 and mode 0700. Idempotent. Run before
+// every container spawn so Docker can never silently auto-create a missing
+// source path as root:root.
 func ensureUserDirs(savesRoot, uid string) error {
-	for _, dir := range []string{userDataDir(savesRoot, uid), userConfigDir(savesRoot, uid)} {
+	for _, dir := range []string{
+		userDataDir(savesRoot, uid),
+		userConfigDir(savesRoot, uid),
+		userTilesetDir(savesRoot, uid),
+	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
@@ -64,12 +74,16 @@ func ensureUserDirs(savesRoot, uid string) error {
 
 // dockerRun starts a DF container for the given user and returns the container ID.
 // The container is reachable at df-<uid>:<containerPort> on cfg.Network.
-func dockerRun(cfg *Config, uid, image string) (id string, err error) {
+//
+// activeTileset (may be empty) is passed through as DF_ACTIVE_TILESET so the
+// in-container apply-tilesets.sh can patch init.txt before DF launches.
+func dockerRun(cfg *Config, uid, image, activeTileset string) (id string, err error) {
 	if err := ensureUserDirs(cfg.SavesRoot, uid); err != nil {
 		return "", fmt.Errorf("ensure user dirs for %s: %w", uid, err)
 	}
 	dataDir := userDataDir(cfg.SavesRoot, uid)
 	configDir := userConfigDir(cfg.SavesRoot, uid)
+	tilesetDir := userTilesetDir(cfg.SavesRoot, uid)
 	name := fmt.Sprintf("df-%s", uid)
 
 	// Remove any stopped container holding this name (e.g. one the s6 finish
@@ -93,6 +107,8 @@ func dockerRun(cfg *Config, uid, image string) (id string, err error) {
 		"--tmpfs", "/tmp:size=64m",
 		"--mount", fmt.Sprintf("type=bind,source=%s,target=%s", dataDir, containerDataDir),
 		"--mount", fmt.Sprintf("type=bind,source=%s,target=%s", configDir, containerConfigDir),
+		"--mount", fmt.Sprintf("type=bind,source=%s,target=%s,readonly", tilesetDir, containerTilesetsDir),
+		"-e", "DF_ACTIVE_TILESET=" + activeTileset,
 		image,
 	}
 
