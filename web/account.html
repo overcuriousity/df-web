@@ -27,9 +27,27 @@
   .passkey-list li:last-child { border-bottom: none; }
   #enroll-status { font-size: 0.85rem; margin-top: 0.8rem; min-height: 1.2em; }
   #snapshot-status { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
+  #stop-status     { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
+  #tileset-status  { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
   .hint { font-size: 0.75rem; color: #666; margin: -0.4rem 0 0.8rem 0; }
   .ok  { color: #70c070; }
   .err { color: #c06060; }
+  .tileset-list { list-style: none; margin: 0.4rem 0 0.8rem 0; }
+  .tileset-list li { font-size: 0.85rem; color: #aaa; padding: 0.35rem 0;
+                     border-bottom: 1px solid #2a2420; display: flex;
+                     align-items: center; gap: 0.5rem; }
+  .tileset-list li:last-child { border-bottom: none; }
+  .tileset-list .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tileset-list .badge { font-size: 0.7rem; color: #c8a870; border: 1px solid #c8a870;
+                         border-radius: 2px; padding: 0.05rem 0.35rem; letter-spacing: 0.05em; }
+  .tileset-list .mini { font-size: 0.75rem; padding: 0.2rem 0.5rem; cursor: pointer;
+                        background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+                        border-radius: 2px; font-family: inherit; }
+  .tileset-list .mini.del { border-color: #a06060; color: #c08080; }
+  .tileset-list .mini:hover { background: var(--btn-hover); }
+  .upload-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+  .upload-row input[type=file] { flex: 1; font-size: 0.8rem; color: #aaa; }
+  .upload-row button { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
   .bay12 { margin-top: 1.5rem; font-size: 0.8rem; color: #888; text-align: center; max-width: 420px; }
   .bay12 a { color: #8b7355; text-decoration: none; }
   .bay12 a:hover { color: #c8a870; }
@@ -72,11 +90,33 @@
   <p class="hint">Captures the latest on-disk save. For the freshest copy, save in-game first.</p>
   <p id="snapshot-status"></p>
 
+  <button class="btn" type="button" onclick="stopGame()"
+          style="border-color:#a06060;color:#c08080">
+    &#9209; Stop game (saves your progress)
+  </button>
+  <p class="hint">Ends the current session. Your saves stay in your account.</p>
+  <p id="stop-status"></p>
+
   <a class="btn" href="/account/export"
      onclick="return confirm('This will END your active game session (your progress is saved first) and download all your saves as a tar.gz archive. For a copy without ending your session, use Snapshot instead. Continue?');"
      style="border-color:#a06060;color:#c08080">
     &#9209; Stop session and download all saves
   </a>
+
+  <hr class="divider">
+
+  <h2>[ Tilesets ]</h2>
+
+  <ul id="tileset-list" class="tileset-list">
+    <li style="color:#666;border:none;">Loading…</li>
+  </ul>
+
+  <div class="upload-row">
+    <input type="file" id="tileset-file" accept="image/png">
+    <button class="btn mini" type="button" onclick="uploadTileset()" style="margin:0;width:auto;">Upload</button>
+  </div>
+  <p class="hint">PNG only, 4&nbsp;MiB max, up to 20 files. Active tileset takes effect the next time your game starts.</p>
+  <p id="tileset-status"></p>
 
   <hr class="divider">
 
@@ -127,6 +167,139 @@ async function enrollPasskey() {
     status.textContent = 'Registration failed: ' + e.message;
   }
 }
+
+async function stopGame() {
+  if (!confirm('Stop your running game? Your progress will be saved first.')) return;
+  const status = document.getElementById('stop-status');
+  status.className = '';
+  status.textContent = 'Stopping…';
+  try {
+    const r = await fetch('/session/stop', { method: 'POST' });
+    if (r.status === 409) {
+      status.className = 'err';
+      status.textContent = 'No active game session.';
+      return;
+    }
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    status.className = 'ok';
+    status.textContent = 'Game stopped. Saves are intact.';
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Stop failed: ' + e.message;
+  }
+}
+
+async function loadTilesets() {
+  const list = document.getElementById('tileset-list');
+  try {
+    const r = await fetch('/account/tilesets');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    list.innerHTML = '';
+    const items = data.tilesets || [];
+    if (items.length === 0) {
+      list.innerHTML = '<li style="color:#666;border:none;">No tilesets uploaded yet.</li>';
+      return;
+    }
+    for (const t of items) {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = t.name;
+      li.appendChild(name);
+
+      if (data.active === t.name) {
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.textContent = 'ACTIVE';
+        li.appendChild(b);
+      } else {
+        const setBtn = document.createElement('button');
+        setBtn.className = 'mini';
+        setBtn.type = 'button';
+        setBtn.textContent = 'Set active';
+        setBtn.onclick = () => setActiveTileset(t.name);
+        li.appendChild(setBtn);
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'mini del';
+      delBtn.type = 'button';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = () => deleteTileset(t.name);
+      li.appendChild(delBtn);
+
+      list.appendChild(li);
+    }
+  } catch (e) {
+    list.innerHTML = '<li class="err" style="border:none;">Could not load: ' + e.message + '</li>';
+  }
+}
+
+async function uploadTileset() {
+  const input = document.getElementById('tileset-file');
+  const status = document.getElementById('tileset-status');
+  status.className = '';
+  if (!input.files || !input.files[0]) {
+    status.className = 'err';
+    status.textContent = 'Choose a PNG file first.';
+    return;
+  }
+  const file = input.files[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  status.textContent = 'Uploading ' + file.name + '…';
+  try {
+    const r = await fetch('/account/tilesets', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    status.className = 'ok';
+    status.textContent = 'Uploaded ' + file.name;
+    input.value = '';
+    loadTilesets();
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Upload failed: ' + e.message.trim();
+  }
+}
+
+async function setActiveTileset(name) {
+  const status = document.getElementById('tileset-status');
+  status.className = '';
+  status.textContent = 'Setting ' + name + ' as active…';
+  try {
+    const r = await fetch('/account/tilesets/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    status.className = 'ok';
+    status.textContent = name + ' will be used next session.';
+    loadTilesets();
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Could not set active: ' + e.message.trim();
+  }
+}
+
+async function deleteTileset(name) {
+  if (!confirm('Delete tileset "' + name + '"?')) return;
+  const status = document.getElementById('tileset-status');
+  status.className = '';
+  status.textContent = 'Deleting ' + name + '…';
+  try {
+    const r = await fetch('/account/tilesets/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    status.className = 'ok';
+    status.textContent = 'Deleted ' + name;
+    loadTilesets();
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Delete failed: ' + e.message.trim();
+  }
+}
+
+loadTilesets();
 
 async function snapshotSaves() {
   const status = document.getElementById('snapshot-status');

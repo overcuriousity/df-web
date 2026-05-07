@@ -26,6 +26,10 @@ type User struct {
 	OIDCSub     string              `yaml:"oidc_sub"`
 	Passkeys    []PasskeyCredential `yaml:"passkeys"`
 	DefaultMode string              `yaml:"default_mode"` // "sdl" or "text"
+	// ActiveTileset is the filename (e.g. "curses_640x300.png") of the user's
+	// chosen tileset under <savesRoot>/<uid>/tilesets/. Applied to init.txt
+	// at container spawn. Empty means "use the image default".
+	ActiveTileset string `yaml:"active_tileset,omitempty"`
 }
 
 type UserStore struct {
@@ -110,6 +114,18 @@ func (s *UserStore) UpdatePasskeys(uid string, creds []PasskeyCredential) error 
 		return fmt.Errorf("user %q not found", uid)
 	}
 	u.Passkeys = creds
+	s.mu.Unlock()
+	return s.save()
+}
+
+func (s *UserStore) SetActiveTileset(uid, name string) error {
+	s.mu.Lock()
+	u, ok := s.users[uid]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("user %q not found", uid)
+	}
+	u.ActiveTileset = name
 	s.mu.Unlock()
 	return s.save()
 }
