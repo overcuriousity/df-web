@@ -363,7 +363,7 @@ func hasAnyContent(userRoot string) bool {
 }
 
 // handleAccountExport stops the user's active container (flushing saves via the
-// quit-save sequence) and streams their entire save directory as a tar.gz download.
+// quit-save sequence) and streams their data/ + config/ as a tar.gz download.
 func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 
@@ -388,7 +388,7 @@ func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	m.streamSavesTarball(w, uid)
 }
 
-// handleAccountSnapshot streams the user's save directory as a tar.gz without
+// handleAccountSnapshot streams the user's data/ + config/ as a tar.gz without
 // stopping the running container. DF writes saves atomically (temp dir +
 // rename), so a snapshot taken mid-play captures the most recent completed
 // save; the small window during a save's rename is the only risk and the
