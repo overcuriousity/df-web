@@ -14,10 +14,12 @@ import (
 	"strings"
 )
 
-// tilesetNameRe restricts uploaded filenames to a safe charset. No path
-// separators, no leading dot, must end in .png (case-insensitive). Matched
-// against the basename only — never against a full path.
-var tilesetNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+\.[Pp][Nn][Gg]$`)
+// tilesetNameRe restricts uploaded filenames to a safe charset. First
+// character must be alphanumeric (so no leading dot — i.e. no hidden files);
+// remaining characters allow letters, digits, dot, underscore, dash; must
+// end in .png (case-insensitive). Matched against the basename only — never
+// against a full path.
+var tilesetNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.[Pp][Nn][Gg]$`)
 
 const (
 	maxTilesetBytes = 4 << 20 // 4 MiB per file

@@ -486,9 +486,13 @@ func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	ci, ok := m.containers[uid]
 	if ok {
-		// Block ensureContainer races during the up-to-45s graceful stop.
+		// Flag-then-stop-then-delete (mirrors idleReaper). Keeping the entry
+		// in the map with stopping=true is what blocks an ensureContainer
+		// race during the up-to-45s graceful stop: a /play reload finds the
+		// entry, sees stopping=true, and gets errSessionEnding instead of
+		// kicking off a fresh dockerRun whose `docker rm -f df-<uid>` would
+		// interrupt the quit-save.
 		ci.stopping = true
-		delete(m.containers, uid)
 	}
 	m.mu.Unlock()
 
@@ -500,9 +504,15 @@ func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	log.Printf("stop: stopping container %s for user %s", ci.id[:12], uid)
 	if err := dockerStop(ci.id); err != nil {
 		log.Printf("stop: stop container for user %s: %v", uid, err)
-		http.Error(w, "stop failed", http.StatusInternalServerError)
-		return
+		// Fall through to delete the entry anyway; the container is in an
+		// indeterminate state and a stuck stopping=true would lock the user
+		// out of /play forever.
 	}
+	m.mu.Lock()
+	if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+		delete(m.containers, uid)
+	}
+	m.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 
