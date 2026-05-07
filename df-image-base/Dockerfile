@@ -32,8 +32,9 @@ RUN mkdir -p "/root/.local/share/Bay 12 Games/Dwarf Fortress" \
 # Drop PNG files into df-image-base/tilesets/ to include them.
 COPY tilesets/ /opt/df/data/art/
 
-# Patch the shipped config files in place.
-# DF 53.x reads init_default.txt and d_init_default.txt (not init.txt).
+# Patch the shipped template files. DF 53.x copies init_default.txt and
+# d_init_default.txt into the user's XDG_CONFIG_HOME on first run and reads
+# the user copy from then on, so patching the templates is sufficient.
 # WINDOWED:YES — needed for headless Xvfb rendering.
 # SOUND:YES   — audio is captured by PulseAudio null sink and streamed to the browser.
 RUN sed -i 's/^\[WINDOWED:.*\]/[WINDOWED:YES]/' /opt/df/data/init/init_default.txt \
@@ -50,11 +51,5 @@ RUN sed -i 's/^\[AUTOSAVE:.*\]/[AUTOSAVE:SEASONAL]/'             /opt/df/data/in
  && sed -i 's/^\[AUTOSAVE_PAUSE:.*\]/[AUTOSAVE_PAUSE:YES]/'      /opt/df/data/init/d_init_default.txt \
  && sed -i 's/^\[INITIAL_SAVE:.*\]/[INITIAL_SAVE:YES]/'          /opt/df/data/init/d_init_default.txt \
  && sed -i 's/^\[AUTOBACKUP:.*\]/[AUTOBACKUP:YES]/'              /opt/df/data/init/d_init_default.txt
-
-# DF Classic reads init.txt and d_init.txt; the _default files are only
-# templates copied on first run. Bake the patched copies in directly so our
-# settings are authoritative regardless of which file DF picks up.
-RUN cp /opt/df/data/init/init_default.txt   /opt/df/data/init/init.txt \
- && cp /opt/df/data/init/d_init_default.txt /opt/df/data/init/d_init.txt
 
 WORKDIR /opt/df
