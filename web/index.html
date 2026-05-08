@@ -95,6 +95,7 @@ async function passkeyLogin() {
     }
 
     const credential = await navigator.credentials.get({ publicKey: options.publicKey });
+    if (!credential) { status.textContent = 'Cancelled.'; return; }
 
     const finishResp = await fetch('/auth/passkey/login/finish', {
       method: 'POST',

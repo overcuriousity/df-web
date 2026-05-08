@@ -207,15 +207,9 @@ func (m *Manager) passkeyLoginFinish(w http.ResponseWriter, r *http.Request, wa 
 	passkeySessionStore.delete(key)
 
 	uid := string(parsedResponse.Response.UserHandle)
-	user, _ := m.store.ByUID(uid)
-	for i, c := range user.Passkeys {
-		id, _ := decodeBase64URL(c.ID)
-		if string(id) == string(credential.ID) {
-			user.Passkeys[i].SignCount = credential.Authenticator.SignCount
-			break
-		}
+	if err := m.store.UpdatePasskeySignCount(uid, credential.ID, credential.Authenticator.SignCount); err != nil {
+		log.Printf("update sign count for %s: %v", uid, err)
 	}
-	_ = m.store.UpdatePasskeys(uid, user.Passkeys)
 
 	m.setSession(w, uid)
 	writeJSON(w, map[string]string{"status": "ok", "redirect": "/play"})

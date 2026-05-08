@@ -380,20 +380,41 @@ func hasAnyContent(userRoot string) bool {
 func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 
-	// Quiesce the active container so DF flushes saves before we tarball.
+	// Flag-then-stop-then-delete (mirrors handleSessionStop / idleReaper). Leaving
+	// the entry in the map with stopping=true is what blocks an ensureContainer
+	// race during the up-to-45s graceful stop: a concurrent /play reload finds
+	// the entry, sees stopping=true, and gets errSessionEnding instead of
+	// kicking off a fresh dockerRun whose `docker rm -f df-<uid>` would
+	// interrupt DF's quit-save and corrupt the very save we're exporting.
 	m.mu.Lock()
 	ci, hasContainer := m.containers[uid]
 	if hasContainer {
-		delete(m.containers, uid)
+		ci.stopping = true
 	}
 	m.mu.Unlock()
 
 	if hasContainer {
 		log.Printf("export: stopping container %s for user %s (save flush)", ci.id[:12], uid)
 		if err := dockerStop(ci.id); err != nil {
+			// Container is in an indeterminate state — DF may still be running
+			// and holding open save files. Refuse to stream rather than ship a
+			// half-state archive. Clean up the map entry so the user isn't
+			// locked out of /play forever.
 			log.Printf("export: stop container for user %s: %v", uid, err)
+			m.mu.Lock()
+			if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+				delete(m.containers, uid)
+			}
+			m.mu.Unlock()
+			http.Error(w, "could not stop session cleanly — try again in a moment", http.StatusServiceUnavailable)
+			return
 		}
 		m.stopSessionLog(uid)
+		m.mu.Lock()
+		if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+			delete(m.containers, uid)
+		}
+		m.mu.Unlock()
 	}
 
 	filename := fmt.Sprintf("df-%s-%s.tar.gz", uid, time.Now().Format("2006-01-02"))
@@ -405,8 +426,12 @@ func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 // handleAccountSnapshot streams the user's data/ + config/ as a tar.gz without
 // stopping the running container. DF writes saves atomically (temp dir +
 // rename), so a snapshot taken mid-play captures the most recent completed
-// save; the small window during a save's rename is the only risk and the
-// user can simply re-snapshot.
+// save; the small window during a save's rename is the only risk.
+//
+// We sample the save dir's mtime/size signature before and after the walk and
+// expose the result via X-Snapshot-Consistent: if the disk state changed
+// during streaming the client knows the archive may have caught a save
+// mid-rename and can warn the user to re-snapshot.
 func (m *Manager) handleAccountSnapshot(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 
@@ -420,7 +445,41 @@ func (m *Manager) handleAccountSnapshot(w http.ResponseWriter, r *http.Request) 
 	filename := fmt.Sprintf("df-%s-%s-snapshot.tar.gz", uid, time.Now().Format("2006-01-02"))
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+
+	beforeSig := saveDirSignature(filepath.Join(m.cfg.SavesRoot, uid))
+	w.Header().Set("X-Snapshot-Mtime-Before", beforeSig)
+	// Set the "after" header optimistically; if the streamed walk takes long
+	// enough for DF to mutate state, the X-Snapshot-Consistent trailer will
+	// reflect that. We use Trailer because we can't know the post-walk
+	// signature until streaming is finished.
+	w.Header().Set("Trailer", "X-Snapshot-Consistent")
 	m.streamSavesTarball(w, uid)
+	afterSig := saveDirSignature(filepath.Join(m.cfg.SavesRoot, uid))
+	if beforeSig == afterSig {
+		w.Header().Set("X-Snapshot-Consistent", "true")
+	} else {
+		w.Header().Set("X-Snapshot-Consistent", "false")
+	}
+}
+
+// saveDirSignature returns a cheap fingerprint of the save tree's mutation
+// state — the sum of (mtime, size) over every regular file. Used to detect
+// changes during a snapshot stream without paying for a full content hash.
+func saveDirSignature(root string) string {
+	var mtimeSum, sizeSum int64
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		mtimeSum += info.ModTime().UnixNano()
+		sizeSum += info.Size()
+		return nil
+	})
+	return fmt.Sprintf("%d-%d", mtimeSum, sizeSum)
 }
 
 // handleSessionStatus returns idle / timeout info for the caller's container
@@ -451,9 +510,8 @@ func (m *Manager) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if ok {
 		out.IdleSeconds = idle
-		out.SecondsUntilReap = timeout - idle
-		if out.SecondsUntilReap < 0 {
-			out.SecondsUntilReap = 0
+		if remaining := timeout - idle; remaining > 0 {
+			out.SecondsUntilReap = remaining
 		}
 	}
 

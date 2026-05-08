@@ -120,7 +120,12 @@ func (m *Manager) oidcCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func randomNonce() string {
+	// Panic on rand.Read failure — silently returning a zero-byte nonce would
+	// make the OIDC state parameter predictable and break CSRF protection on
+	// the callback. session.go's randomToken takes the same stance.
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
