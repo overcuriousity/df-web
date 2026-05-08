@@ -7,6 +7,9 @@ session-manager/session-manager
 # Secrets — never commit these (commit the .example files instead)
 session-manager/config.yml
 session-manager/users.yml
+session-manager/users.db
+session-manager/users.db-wal
+session-manager/users.db-shm
 
 # Docker build cache
 .dockerignore
