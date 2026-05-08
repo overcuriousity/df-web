@@ -129,7 +129,9 @@
   <hr class="divider">
 
   <a class="btn" href="/play">&#9654; Back to game</a>
-  <a class="btn" id="admin-link" href="/admin" style="border-color:#c8a870;color:#c8a870;display:none;">&#9881; Admin</a>
+  {{if .IsAdmin}}
+  <a class="btn" href="/admin" style="border-color:#c8a870;color:#c8a870;">&#9881; Admin</a>
+  {{end}}
   <a class="btn" href="/auth/logout" style="border-color:#666;color:#888;">Sign out</a>
 </div>
 
@@ -341,18 +343,6 @@ async function importSave() {
     status.textContent = 'Import failed: ' + e.message.trim();
   }
 }
-
-(async () => {
-  try {
-    const r = await fetch('/session/capabilities');
-    if (!r.ok) return;
-    const caps = await r.json();
-    if (caps.is_admin) {
-      const link = document.getElementById('admin-link');
-      if (link) link.style.display = 'block';
-    }
-  } catch (_) { /* non-fatal */ }
-})();
 
 async function snapshotSaves() {
   const status = document.getElementById('snapshot-status');

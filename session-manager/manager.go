@@ -133,9 +133,11 @@ func (m *Manager) handleAccount(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		DisplayName string
 		Passkeys    []PasskeyCredential
+		IsAdmin     bool
 	}{
 		DisplayName: user.DisplayName,
 		Passkeys:    user.Passkeys,
+		IsAdmin:     user.IsAdmin,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
