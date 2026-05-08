@@ -7,14 +7,14 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,8 +74,17 @@ func openDB(path string) (*UserStore, error) {
 	// Single writer connection avoids SQLITE_BUSY on concurrent mutations.
 	db.SetMaxOpenConns(1)
 
+	// journal_mode returns the active mode — verify WAL was accepted.
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqlite pragma journal_mode: %w", err)
+	}
+	if mode != "wal" {
+		db.Close()
+		return nil, fmt.Errorf("sqlite: could not enable WAL mode (filesystem returned %q)", mode)
+	}
 	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
 	} {
@@ -193,23 +202,25 @@ func fetchUserRow(db *sql.DB, uid string) (*User, bool, error) {
 
 func (s *UserStore) ByToken(raw string) (*User, bool) {
 	want := sha256hex(raw)
-	var uid string
-	err := s.db.QueryRow(`SELECT uid FROM users WHERE token_hash=?`, want).Scan(&uid)
-	if err != nil {
+	u := &User{}
+	var isAdmin int
+	err := s.db.QueryRow(
+		`SELECT uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode FROM users WHERE token_hash=?`, want,
+	).Scan(&u.UID, &u.DisplayName, &u.TokenHash, &u.OIDCSub, &isAdmin, &u.ActiveTileset, &u.DefaultMode)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false
 	}
-	// Re-verify with constant-time compare to mitigate any DB timing leakage.
-	var storedHash string
-	s.db.QueryRow(`SELECT token_hash FROM users WHERE uid=?`, uid).Scan(&storedHash)
-	if subtle.ConstantTimeCompare([]byte(storedHash), []byte(want)) != 1 {
-		return nil, false
-	}
-	u, ok, err := fetchUserRow(s.db, uid)
 	if err != nil {
 		log.Printf("users.ByToken: %v", err)
 		return nil, false
 	}
-	return u, ok
+	u.IsAdmin = isAdmin != 0
+	u.Passkeys, err = fetchPasskeys(s.db, u.UID)
+	if err != nil {
+		log.Printf("users.ByToken: fetchPasskeys: %v", err)
+		return nil, false
+	}
+	return u, true
 }
 
 func (s *UserStore) ByOIDCSub(sub string) (*User, bool) {
@@ -282,23 +293,34 @@ func (s *UserStore) UpdatePasskeySignCount(uid string, credID []byte, signCount 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	// Find the matching credential; close rows before issuing the UPDATE to
+	// avoid deadlocking on the single connection.
+	var matchCredID string
+	var currentCount uint32
 	for rows.Next() {
 		var credIDStr string
-		var currentCount uint32
-		if err := rows.Scan(&credIDStr, &currentCount); err != nil {
+		var cnt uint32
+		if err := rows.Scan(&credIDStr, &cnt); err != nil {
+			rows.Close()
 			return err
 		}
 		id, _ := decodeBase64URL(credIDStr)
 		if subtle.ConstantTimeCompare(id, credID) == 1 {
-			if currentCount == signCount {
-				return nil
-			}
-			_, err := s.db.Exec(`UPDATE passkeys SET sign_count=? WHERE uid=? AND cred_id=?`, signCount, uid, credIDStr)
-			return err
+			matchCredID = credIDStr
+			currentCount = cnt
+			break
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if matchCredID == "" || currentCount == signCount {
+		return nil
+	}
+	_, err = s.db.Exec(`UPDATE passkeys SET sign_count=? WHERE uid=? AND cred_id=?`, signCount, uid, matchCredID)
+	return err
 }
 
 func (s *UserStore) AllPasskeyUsers() []*User {
@@ -309,18 +331,28 @@ func (s *UserStore) AllPasskeyUsers() []*User {
 		log.Printf("users.AllPasskeyUsers: %v", err)
 		return nil
 	}
-	defer rows.Close()
-	var out []*User
+	// Collect UIDs before closing the cursor; fetchUserRow opens its own queries
+	// and would deadlock on the single connection if we called it inside the loop.
+	var uids []string
 	for rows.Next() {
 		var uid string
 		if err := rows.Scan(&uid); err != nil {
+			log.Printf("users.AllPasskeyUsers: scan: %v", err)
 			continue
 		}
+		uids = append(uids, uid)
+	}
+	rows.Close()
+	var out []*User
+	for _, uid := range uids {
 		u, ok, err := fetchUserRow(s.db, uid)
-		if err != nil || !ok {
+		if err != nil {
+			log.Printf("users.AllPasskeyUsers: fetch %s: %v", uid, err)
 			continue
 		}
-		out = append(out, u)
+		if ok {
+			out = append(out, u)
+		}
 	}
 	return out
 }
@@ -400,17 +432,26 @@ func (s *UserStore) All() []*User {
 		log.Printf("users.All: %v", err)
 		return nil
 	}
-	defer rows.Close()
+	// Collect user rows before closing cursor; fetchPasskeys opens its own query
+	// and would deadlock on the single connection if called inside the loop.
 	var out []*User
 	for rows.Next() {
 		u := &User{}
 		var isAdmin int
 		if err := rows.Scan(&u.UID, &u.DisplayName, &u.TokenHash, &u.OIDCSub, &isAdmin, &u.ActiveTileset, &u.DefaultMode); err != nil {
+			log.Printf("users.All: scan: %v", err)
 			continue
 		}
 		u.IsAdmin = isAdmin != 0
-		u.Passkeys, _ = fetchPasskeys(s.db, u.UID)
 		out = append(out, u)
+	}
+	rows.Close()
+	for _, u := range out {
+		var pkErr error
+		u.Passkeys, pkErr = fetchPasskeys(s.db, u.UID)
+		if pkErr != nil {
+			log.Printf("users.All: fetchPasskeys for %s: %v", u.UID, pkErr)
+		}
 	}
 	return out
 }
@@ -442,11 +483,9 @@ func sha256hex(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// isConstraintErr detects SQLite UNIQUE/PRIMARY KEY constraint violations.
+// isConstraintErr detects SQLite UNIQUE/PRIMARY KEY constraint violations
+// (SQLITE_CONSTRAINT = 19, or any extended code with the same base).
 func isConstraintErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "UNIQUE constraint") || strings.Contains(s, "PRIMARY KEY constraint")
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xFF == 19
 }

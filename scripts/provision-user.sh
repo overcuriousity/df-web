@@ -64,6 +64,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USERS_DB="$SCRIPT_DIR/../session-manager/users.db"
 
+# Ensure the DB file exists as a regular file before Docker starts the container.
+# Docker creates bind-mount targets as directories when the path is absent on
+# the host, which prevents SQLite from opening the file.
+touch "$USERS_DB"
+
 # Escape a string for safe use in a SQLite single-quoted literal.
 sql_escape() {
     printf "%s" "$1" | sed "s/'/''/g"
