@@ -6,12 +6,15 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -127,6 +130,21 @@ func (s *UserStore) saveLocked() error {
 		return err
 	}
 	if err := os.Rename(tmpPath, s.path); err != nil {
+		// Bind-mounted single files (our docker-compose mounts users.yml that
+		// way) reject rename-over with EBUSY because the kernel pins the inode
+		// at the mount point. Fall back to copying the tmp file's contents over
+		// the existing inode via O_TRUNC. We've already fsync'd the tmp, so a
+		// crash mid-copy leaves the tmp file intact for manual recovery; the
+		// only guarantee we lose vs. rename is the inode-swap atomicity, which
+		// is irrelevant here since nothing reads users.yml mid-write.
+		if errors.Is(err, syscall.EBUSY) {
+			if copyErr := overwriteInPlace(tmpPath, s.path); copyErr != nil {
+				cleanup()
+				return copyErr
+			}
+			cleanup()
+			return nil
+		}
 		cleanup()
 		return err
 	}
@@ -350,6 +368,30 @@ func newRawToken() (string, error) {
 		return "", fmt.Errorf("token generation: only %d usable chars", len(cleaned))
 	}
 	return string(cleaned[:40]), nil
+}
+
+// overwriteInPlace copies src's contents over dst using O_TRUNC, preserving
+// dst's inode (required for bind-mounted single files). Caller must have
+// already fsync'd src so the data is durable on disk.
+func overwriteInPlace(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func sha256hex(s string) string {
