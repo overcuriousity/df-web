@@ -42,7 +42,7 @@ func (m *Manager) handleLegendsIndex(w http.ResponseWriter, r *http.Request) {
 	var files []legendsFile
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, "legends") || !strings.HasSuffix(n, ".xml") {
+		if e.IsDir() || !legendsNameRe.MatchString(n) || strings.Contains(n, "..") {
 			continue
 		}
 		info, err := e.Info()

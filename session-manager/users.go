@@ -114,9 +114,16 @@ func (s *UserStore) saveLocked() error {
 		return err
 	}
 	// fsync the parent directory so the rename is durable.
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		_ = d.Close()
+	d, err := os.Open(dir)
+	if err != nil {
+		log.Printf("users.save: open parent dir %s for fsync: %v", dir, err)
+		return nil
+	}
+	if err := d.Sync(); err != nil {
+		log.Printf("users.save: fsync parent dir %s: %v", dir, err)
+	}
+	if err := d.Close(); err != nil {
+		log.Printf("users.save: close parent dir %s: %v", dir, err)
 	}
 	return nil
 }
