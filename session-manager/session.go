@@ -67,7 +67,10 @@ func (m *Manager) sessionUID(r *http.Request) (string, error) {
 		return "", errors.New("invalid signature")
 	}
 	t, err := time.Parse(time.RFC3339, issued)
-	if err != nil || time.Since(t) > cookieTTL {
+	if err != nil {
+		return "", errors.New("malformed cookie")
+	}
+	if time.Since(t) > cookieTTL {
 		return "", errors.New("session expired")
 	}
 	return uid, nil

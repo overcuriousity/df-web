@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -62,18 +63,62 @@ func (s *UserStore) reload() error {
 	return nil
 }
 
-func (s *UserStore) save() error {
-	s.mu.RLock()
+// save serialises the in-memory user map to disk atomically. Callers must
+// already hold s.mu (write lock); see saveLocked / the *Locked write helpers.
+// The caller-holds-lock contract means concurrent writers can't lose updates
+// (a previous version released the lock before marshalling, letting two
+// in-flight UpdatePasskeys clobber each other).
+//
+// The temp-file + rename + dir-fsync sequence ensures users.yml is never seen
+// truncated, even on crash or power loss between truncate and write — which
+// would otherwise lock every user out of the service.
+func (s *UserStore) saveLocked() error {
 	list := make([]*User, 0, len(s.users))
 	for _, u := range s.users {
 		list = append(list, u)
 	}
-	s.mu.RUnlock()
 	data, err := yaml.Marshal(list)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0600)
+
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, ".users-*.yml.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		cleanup()
+		return err
+	}
+	// fsync the parent directory so the rename is durable.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 func (s *UserStore) ByToken(raw string) (*User, bool) {
@@ -108,26 +153,49 @@ func (s *UserStore) ByUID(uid string) (*User, bool) {
 
 func (s *UserStore) UpdatePasskeys(uid string, creds []PasskeyCredential) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	u, ok := s.users[uid]
 	if !ok {
-		s.mu.Unlock()
 		return fmt.Errorf("user %q not found", uid)
 	}
 	u.Passkeys = creds
-	s.mu.Unlock()
-	return s.save()
+	return s.saveLocked()
 }
 
 func (s *UserStore) SetActiveTileset(uid, name string) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	u, ok := s.users[uid]
 	if !ok {
-		s.mu.Unlock()
 		return fmt.Errorf("user %q not found", uid)
 	}
 	u.ActiveTileset = name
-	s.mu.Unlock()
-	return s.save()
+	return s.saveLocked()
+}
+
+// UpdatePasskeySignCount atomically writes a new SignCount for the credential
+// matching credID under uid. Used after a successful WebAuthn assertion to
+// keep the clone-detection counter monotonic. Returns nil if the user or
+// credential is not found (the assertion already validated the credential
+// itself; a missing entry here means a concurrent delete won the race).
+func (s *UserStore) UpdatePasskeySignCount(uid string, credID []byte, signCount uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[uid]
+	if !ok {
+		return nil
+	}
+	for i, c := range u.Passkeys {
+		id, _ := decodeBase64URL(c.ID)
+		if subtle.ConstantTimeCompare(id, credID) == 1 {
+			if u.Passkeys[i].SignCount == signCount {
+				return nil // no change, skip the disk write
+			}
+			u.Passkeys[i].SignCount = signCount
+			return s.saveLocked()
+		}
+	}
+	return nil
 }
 
 func (s *UserStore) AllPasskeyUsers() []*User {

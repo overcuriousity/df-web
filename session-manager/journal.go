@@ -106,13 +106,28 @@ func (m *Manager) handleJournal(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, content, 0o600); err != nil {
+		// Per-request temp file: a fixed path+".tmp" lets two concurrent PUTs
+		// (autosave + manual save, two open tabs) race on the same name and
+		// silently lose one writer's content.
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".journal-*.tmp")
+		if err != nil {
 			http.Error(w, "cannot write journal", http.StatusInternalServerError)
 			return
 		}
-		if err := os.Rename(tmp, path); err != nil {
-			os.Remove(tmp)
+		tmpPath := tmp.Name()
+		if _, err := tmp.Write(content); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+			http.Error(w, "cannot write journal", http.StatusInternalServerError)
+			return
+		}
+		if err := tmp.Close(); err != nil {
+			os.Remove(tmpPath)
+			http.Error(w, "cannot write journal", http.StatusInternalServerError)
+			return
+		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			os.Remove(tmpPath)
 			http.Error(w, "cannot save journal", http.StatusInternalServerError)
 			return
 		}

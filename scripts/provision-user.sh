@@ -19,6 +19,15 @@ UID_ARG="${1:?Usage: $0 [--rotate] <uid> [display_name]}"
 DISPLAY_NAME="${2:-$UID_ARG}"
 SAVES_ROOT="${SAVES_ROOT:-/srv/df/users}"
 
+# UIDs become Docker container suffixes ("df-<uid>"), filesystem paths under
+# SAVES_ROOT, and regex literals in the awk-rotate path below. Restrict to a
+# safe charset up front so a UID with regex metacharacters can't match the
+# wrong block in users.yml or escape into a path.
+if ! printf '%s' "$UID_ARG" | grep -Eq '^[a-z0-9][a-z0-9_-]{0,31}$'; then
+    echo "Error: uid must be 1-32 chars, lowercase alphanumeric / underscore / dash, starting alphanumeric." >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USERS_YML="$SCRIPT_DIR/../session-manager/users.yml"
 

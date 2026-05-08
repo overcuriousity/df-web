@@ -152,6 +152,7 @@ async function enrollPasskey() {
     }
 
     const credential = await navigator.credentials.create({ publicKey: options.publicKey });
+    if (!credential) { status.textContent = 'Cancelled.'; return; }
 
     const finishResp = await fetch('/auth/passkey/register/finish', {
       method: 'POST',
@@ -314,8 +315,9 @@ async function snapshotSaves() {
     const blob = await r.blob();
     let filename = 'df-snapshot.tar.gz';
     const cd = r.headers.get('Content-Disposition') || '';
-    const m = cd.match(/filename="?([^"]+)"?/);
-    if (m) filename = m[1];
+    // Match either filename="quoted" or filename=unquoted (stops at ; or end).
+    const m = cd.match(/filename="([^"]+)"|filename=([^;]+)/);
+    if (m) filename = (m[1] || m[2]).trim();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

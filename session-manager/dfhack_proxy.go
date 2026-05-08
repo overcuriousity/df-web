@@ -81,7 +81,7 @@ func (m *Manager) handleDFHackSetLabor(w http.ResponseWriter, r *http.Request) {
 		Labor   int  `json:"labor"`
 		Enabled bool `json:"enabled"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

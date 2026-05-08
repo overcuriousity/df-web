@@ -237,19 +237,31 @@ function toggleAudio() {
 let lastInputAt = Date.now();
 function noteInput() { lastInputAt = Date.now(); }
 
+// Parent-window listeners are the reliable fallback: input that bubbles up
+// from the iframe (or hits the toolbar/sidebar) keeps the keepalive timer
+// alive even if contentDocument access is blocked or the iframe re-navigates.
+['keydown', 'mousedown', 'wheel', 'touchstart', 'pointerdown'].forEach(ev =>
+  document.addEventListener(ev, noteInput, { capture: true, passive: true }));
+window.addEventListener('focus', noteInput);
+// The browser also fires 'blur' on the parent window when the user clicks
+// into the iframe — treat that as recent input.
+window.addEventListener('blur', noteInput);
+
 const novncFrame = document.getElementById('novnc-frame');
-novncFrame.addEventListener('load', () => {
-  document.getElementById('fs-hint').textContent = 'Click inside the game, then F11 for fullscreen.';
-  novncFrame.contentWindow.focus();
-  fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
-  noteInput();
+function attachIframeInputListeners() {
   try {
     const doc = novncFrame.contentDocument;
-    if (doc) {
-      ['keydown', 'mousedown', 'wheel', 'touchstart'].forEach(ev =>
-        doc.addEventListener(ev, noteInput, { capture: true, passive: true }));
-    }
+    if (!doc) return;
+    ['keydown', 'mousedown', 'wheel', 'touchstart', 'pointerdown'].forEach(ev =>
+      doc.addEventListener(ev, noteInput, { capture: true, passive: true }));
   } catch (_) {}
+}
+novncFrame.addEventListener('load', () => {
+  document.getElementById('fs-hint').textContent = 'Click inside the game, then F11 for fullscreen.';
+  novncFrame.contentWindow?.focus();
+  fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
+  noteInput();
+  attachIframeInputListeners();
 });
 
 setInterval(() => {
@@ -276,9 +288,13 @@ function fmtRemaining(s) {
 }
 
 async function pollSessionStatus() {
+  // Every code path below MUST schedule a follow-up poll. A single fetch
+  // failure that returns without rearming setTimeout would freeze the idle
+  // chip and silently disable the warning dialog — the user would lose their
+  // session with zero on-screen indication.
   try {
     const r = await fetch('/session/status', { cache: 'no-store' });
-    if (!r.ok) return;
+    if (!r.ok) { schedulePoll(15000); return; }
     const s = await r.json();
     if (!s.active) {
       idleChip.style.display = 'none';
@@ -299,7 +315,9 @@ async function pollSessionStatus() {
       if (idleWarning.open) idleWarning.close();
       schedulePoll(30000);
     }
-  } catch (_) {}
+  } catch (_) {
+    schedulePoll(15000);
+  }
 }
 
 function schedulePoll(ms) {

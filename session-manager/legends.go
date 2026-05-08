@@ -7,9 +7,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// legendsNameRe matches DF's legends export filenames. Stricter than the prior
+// HasPrefix/HasSuffix pair, which let names like "legends..xml" through —
+// harmless today but a foothold if the path concat ever loses filepath.Join.
+var legendsNameRe = regexp.MustCompile(`^legends[A-Za-z0-9_.-]*\.xml$`)
 
 // handleLegendsIndex lists legends XML exports for the user.
 func (m *Manager) handleLegendsIndex(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +65,9 @@ func (m *Manager) handleLegendsXML(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 	name := r.URL.Query().Get("file")
 
-	// Validate: must look like a legends*.xml filename, no path separators.
-	if name == "" || strings.ContainsAny(name, "/\\") ||
-		!strings.HasPrefix(name, "legends") || !strings.HasSuffix(name, ".xml") {
+	// Validate: must look like a legends*.xml filename, no path separators
+	// or "..", no other shenanigans.
+	if !legendsNameRe.MatchString(name) || strings.Contains(name, "..") {
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}

@@ -49,8 +49,17 @@ func classifyLine(line string) string {
 type sessionLog struct {
 	mu     sync.Mutex
 	events []gamelogEvent // ring buffer, capped at maxEvents
-	subs   []chan gamelogEvent
+	subs   []*subscriber
 	done   chan struct{}
+}
+
+// subscriber is one SSE client. drops counts events that were skipped because
+// the client wasn't draining its channel fast enough; the SSE handler emits a
+// synthetic "_dropped" event so the UI can warn the user instead of silently
+// missing siege/death notifications on a slow link.
+type subscriber struct {
+	ch    chan gamelogEvent
+	drops uint64
 }
 
 const maxEvents = 500
@@ -74,20 +83,18 @@ func (sl *sessionLog) append(ev gamelogEvent) {
 	if len(sl.events) > maxEvents {
 		sl.events = sl.events[len(sl.events)-maxEvents:]
 	}
-	subs := make([]chan gamelogEvent, len(sl.subs))
-	copy(subs, sl.subs)
-	sl.mu.Unlock()
-
-	for _, ch := range subs {
+	for _, s := range sl.subs {
 		select {
-		case ch <- ev:
-		default: // slow subscriber: drop rather than block
+		case s.ch <- ev:
+		default:
+			s.drops++ // slow subscriber: count the drop so the SSE handler can surface it
 		}
 	}
+	sl.mu.Unlock()
 }
 
-func (sl *sessionLog) subscribe() chan gamelogEvent {
-	ch := make(chan gamelogEvent, 64)
+func (sl *sessionLog) subscribe() *subscriber {
+	s := &subscriber{ch: make(chan gamelogEvent, 64)}
 	sl.mu.Lock()
 	// replay recent events to the new subscriber
 	start := 0
@@ -95,22 +102,32 @@ func (sl *sessionLog) subscribe() chan gamelogEvent {
 		start = len(sl.events) - replayCount
 	}
 	for _, ev := range sl.events[start:] {
-		ch <- ev
+		s.ch <- ev
 	}
-	sl.subs = append(sl.subs, ch)
+	sl.subs = append(sl.subs, s)
 	sl.mu.Unlock()
-	return ch
+	return s
 }
 
-func (sl *sessionLog) unsubscribe(ch chan gamelogEvent) {
+func (sl *sessionLog) unsubscribe(s *subscriber) {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
-	for i, s := range sl.subs {
-		if s == ch {
+	for i, t := range sl.subs {
+		if t == s {
 			sl.subs = append(sl.subs[:i], sl.subs[i+1:]...)
 			return
 		}
 	}
+}
+
+// takeDrops returns and resets the dropped-event count for s. Must be called
+// without holding sl.mu (it acquires the lock itself).
+func (sl *sessionLog) takeDrops(s *subscriber) uint64 {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	d := s.drops
+	s.drops = 0
+	return d
 }
 
 // startGamelogTailer launches a goroutine that reads new lines appended to
@@ -148,6 +165,18 @@ func startGamelogTailer(sl *sessionLog, savesRoot, uid string) {
 			case <-sl.done:
 				return
 			case <-time.After(500 * time.Millisecond):
+			}
+
+			// Detect truncation/rotation: if the file shrank below our current
+			// read offset (DF abandon-and-re-embark, or anything else that
+			// resets gamelog.txt mid-session), seek back to the start so we
+			// pick up new writes instead of waiting forever past the new EOF.
+			if pos, perr := f.Seek(0, io.SeekCurrent); perr == nil {
+				if info, serr := f.Stat(); serr == nil && info.Size() < pos {
+					if _, err := f.Seek(0, io.SeekStart); err == nil {
+						buf = buf[:0]
+					}
+				}
 			}
 
 			n, err := f.Read(tmp)
@@ -195,8 +224,8 @@ func (m *Manager) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sl := m.getOrCreateSessionLog(uid)
-	ch := sl.subscribe()
-	defer sl.unsubscribe(ch)
+	sub := sl.subscribe()
+	defer sl.unsubscribe(sub)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -212,6 +241,13 @@ func (m *Manager) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
+	emitDrops := func() {
+		if d := sl.takeDrops(sub); d > 0 {
+			fmt.Fprintf(w, "event: dropped\ndata: {\"count\":%d}\n\n", d)
+			flusher.Flush()
+		}
+	}
+
 	ctx := r.Context()
 	for {
 		select {
@@ -221,16 +257,19 @@ func (m *Manager) handleTimeline(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "event: session-ended\ndata: {}\n\n")
 			flusher.Flush()
 			return
-		case ev, ok := <-ch:
-			if !ok {
-				return
+		case ev := <-sub.ch:
+			data, err := json.Marshal(ev)
+			if err != nil {
+				log.Printf("gamelog: marshal event for user %s: %v", uid, err)
+				continue
 			}
-			data, _ := json.Marshal(ev)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
+			emitDrops()
 		case <-ticker.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
+			emitDrops()
 		}
 	}
 }
