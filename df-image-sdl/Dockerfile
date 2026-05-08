@@ -29,7 +29,8 @@ RUN if [ -n "${DFHACK_VERSION}" ]; then \
       wget -q "https://github.com/DFHack/dfhack/releases/download/${DFHACK_VERSION}/dfhack-${DFHACK_VERSION}-Linux-64bit.tar.bz2" \
         -O /tmp/dfhack.tar.bz2 \
       && tar -xjf /tmp/dfhack.tar.bz2 -C /opt/df \
-      && rm /tmp/dfhack.tar.bz2; \
+      && rm /tmp/dfhack.tar.bz2 \
+      && printf '' > /opt/df/hack/dfhack_setarch.txt; \
     fi
 
 # PRINT_MODE:AUTO lets SDL2 auto-select the renderer (hardware or software).
