@@ -29,6 +29,7 @@
   #snapshot-status { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
   #stop-status     { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
   #tileset-status  { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
+  #import-status   { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; color: #888; }
   .hint { font-size: 0.75rem; color: #666; margin: -0.4rem 0 0.8rem 0; }
   .ok  { color: #70c070; }
   .err { color: #c06060; }
@@ -103,6 +104,13 @@
     &#9209; Stop session and download all saves
   </a>
 
+  <div class="upload-row" style="margin-top:0.8rem;">
+    <input type="file" id="import-file" accept=".zip,.tar.gz,.tgz,application/zip,application/gzip">
+    <button class="btn mini" type="button" onclick="importSave()" style="margin:0;width:auto;">Import save</button>
+  </div>
+  <p class="hint">Upload a .zip or .tar.gz containing one DF region folder (the folder with <code>world.dat</code> and <code>world.sav</code>). Stop your active session first if one is running. Up to 200&nbsp;MiB.</p>
+  <p id="import-status"></p>
+
   <hr class="divider">
 
   <h2>[ Tilesets ]</h2>
@@ -121,6 +129,9 @@
   <hr class="divider">
 
   <a class="btn" href="/play">&#9654; Back to game</a>
+  {{if .IsAdmin}}
+  <a class="btn" href="/admin" style="border-color:#c8a870;color:#c8a870;">&#9881; Admin</a>
+  {{end}}
   <a class="btn" href="/auth/logout" style="border-color:#666;color:#888;">Sign out</a>
 </div>
 
@@ -301,6 +312,37 @@ async function deleteTileset(name) {
 }
 
 loadTilesets();
+
+async function importSave() {
+  const input = document.getElementById('import-file');
+  const status = document.getElementById('import-status');
+  status.className = '';
+  if (!input.files || !input.files[0]) {
+    status.className = 'err';
+    status.textContent = 'Choose a .zip or .tar.gz file first.';
+    return;
+  }
+  const file = input.files[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  status.textContent = 'Uploading ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MiB)…';
+  try {
+    const r = await fetch('/account/import', { method: 'POST', body: fd });
+    if (r.status === 409) {
+      status.className = 'err';
+      status.textContent = 'Stop your active game session first, then retry.';
+      return;
+    }
+    if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
+    const out = await r.json();
+    status.className = 'ok';
+    status.textContent = 'Installed as ' + out.region + ' (' + out.files + ' files, ' + Math.round(out.bytes/1024) + ' KiB).';
+    input.value = '';
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = 'Import failed: ' + e.message.trim();
+  }
+}
 
 async function snapshotSaves() {
   const status = document.getElementById('snapshot-status');

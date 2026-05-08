@@ -77,6 +77,7 @@ func main() {
 	mux.Handle("/account", mgr.requireAuth(http.HandlerFunc(mgr.handleAccount)))
 	mux.Handle("/account/export", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountExport)))
 	mux.Handle("/account/snapshot", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountSnapshot)))
+	mux.Handle("/account/import", mgr.requireAuth(http.HandlerFunc(mgr.handleAccountImport)))
 	mux.Handle("/account/tilesets", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesets)))
 	mux.Handle("/account/tilesets/", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesetItem)))
 
@@ -97,6 +98,13 @@ func main() {
 	}
 	// Capabilities endpoint: lets the frontend discover which optional features are active.
 	mux.Handle("/session/capabilities", mgr.requireAuth(http.HandlerFunc(mgr.handleCapabilities)))
+
+	// Admin routes (require IsAdmin in addition to a valid session).
+	mux.Handle("/admin", mgr.requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(webDir, "admin.html"))
+	})))
+	mux.Handle("/admin/users", mgr.requireAdmin(http.HandlerFunc(mgr.handleAdminUsers)))
+	mux.Handle("/admin/users/", mgr.requireAdmin(http.HandlerFunc(mgr.handleAdminUserItem)))
 
 	// Login page is public; authenticated users are redirected to /play.
 	mux.HandleFunc("/", mgr.handleIndex)

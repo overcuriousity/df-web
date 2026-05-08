@@ -133,9 +133,11 @@ func (m *Manager) handleAccount(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		DisplayName string
 		Passkeys    []PasskeyCredential
+		IsAdmin     bool
 	}{
 		DisplayName: user.DisplayName,
 		Passkeys:    user.Passkeys,
+		IsAdmin:     user.IsAdmin,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
@@ -523,10 +525,15 @@ func (m *Manager) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 // are active on this server. The frontend uses this to show/hide UI elements.
 func (m *Manager) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	type caps struct {
-		DFHack bool `json:"dfhack"`
+		DFHack  bool `json:"dfhack"`
+		IsAdmin bool `json:"is_admin"`
 	}
+	uid := uidFromContext(r.Context())
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(caps{DFHack: m.cfg.DFHackEnabled})
+	_ = json.NewEncoder(w).Encode(caps{
+		DFHack:  m.cfg.DFHackEnabled,
+		IsAdmin: m.store.IsAdmin(uid),
+	})
 }
 
 // handleSessionKeepalive bumps lastSeen for the caller's container, extending
