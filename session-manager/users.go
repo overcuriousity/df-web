@@ -74,19 +74,15 @@ func openDB(path string) (*UserStore, error) {
 	// Single writer connection avoids SQLITE_BUSY on concurrent mutations.
 	db.SetMaxOpenConns(1)
 
-	// journal_mode returns the active mode — verify WAL was accepted.
-	var mode string
-	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("sqlite pragma journal_mode: %w", err)
-	}
-	if mode != "wal" {
-		db.Close()
-		return nil, fmt.Errorf("sqlite: could not enable WAL mode (filesystem returned %q)", mode)
-	}
+	// Use DELETE journal mode (the SQLite default): each committed write lands
+	// directly in the main DB file with no WAL sidecar files. WAL mode creates
+	// users.db-wal/-shm alongside the database; those files are NOT
+	// bind-mounted into the container, so they live on the overlay FS and
+	// vanish on every container recreate — losing all data since the last
+	// checkpoint even on a clean restart.
 	for _, pragma := range []string{
+		"PRAGMA journal_mode=DELETE",
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
@@ -482,6 +478,8 @@ func sha256hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
+
+func (s *UserStore) Close() error { return s.db.Close() }
 
 // isConstraintErr detects SQLite UNIQUE/PRIMARY KEY constraint violations
 // (SQLITE_CONSTRAINT = 19, or any extended code with the same base).
