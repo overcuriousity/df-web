@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Dwarf Fortress</title>
+<style>
+  :root { --bg: #1a1a1a; --fg: #d0c8b0; --accent: #8b7355; --btn: #3a3028; --btn-hover: #5a4a38; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: 'Courier New', monospace;
+         display: flex; flex-direction: column; align-items: center;
+         min-height: 100vh; padding: 2rem; }
+  h1 { font-size: 1.8rem; letter-spacing: 0.1em; color: #c8a870; margin-bottom: 0.4rem; }
+  .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 2.5rem; }
+  .card { background: #242018; border: 1px solid #3a3028; border-radius: 4px;
+          padding: 1.8rem 2rem; width: 100%; max-width: 720px; margin-bottom: 1rem; }
+  h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1.2rem; letter-spacing: 0.05em; }
+  .btn { display: inline-block; padding: 0.5rem 1rem;
+         background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+         border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 0.9rem;
+         text-align: center; text-decoration: none; transition: background 0.15s; }
+  .btn:hover { background: var(--btn-hover); }
+  .btn.danger { border-color: #a06060; color: #c08080; }
+  .btn.full { display: block; width: 100%; padding: 0.7rem 1rem; margin-bottom: 0.6rem; }
+  .divider { border: none; border-top: 1px solid #3a3028; margin: 1.2rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 0.5rem 0.4rem; text-align: left; border-bottom: 1px solid #2a2420; }
+  th { color: var(--accent); font-weight: normal; letter-spacing: 0.05em; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions button { margin-left: 0.4rem; }
+  .badge { font-size: 0.7rem; color: #c8a870; border: 1px solid #c8a870;
+           border-radius: 2px; padding: 0.05rem 0.35rem; letter-spacing: 0.05em; }
+  .badge.muted { color: #666; border-color: #444; }
+  .badge.active { color: #70c070; border-color: #70c070; }
+  .form-row { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+  .form-row input { flex: 1; min-width: 8rem; padding: 0.5rem 0.7rem;
+                    background: #1a1a1a; border: 1px solid #3a3028;
+                    color: var(--fg); font-family: inherit; font-size: 0.9rem;
+                    border-radius: 3px; }
+  #status { font-size: 0.85rem; margin-top: 0.6rem; min-height: 1.2em; color: #888; }
+  .ok  { color: #70c070; }
+  .err { color: #c06060; }
+  .hint { font-size: 0.75rem; color: #666; margin: 0 0 0.8rem 0; }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+           display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal.show { display: flex; }
+  .modal .card { max-width: 520px; }
+  .token-box { font-family: 'Courier New', monospace; font-size: 0.95rem;
+               background: #1a1a1a; border: 1px solid #c8a870; color: #c8a870;
+               padding: 0.8rem; border-radius: 3px; word-break: break-all;
+               margin: 0.6rem 0; user-select: all; }
+</style>
+</head>
+<body>
+
+<h1>&#9881; Admin</h1>
+<p class="subtitle">User management</p>
+
+<div class="card">
+  <h2>[ Create user ]</h2>
+  <p class="hint">UID: 1–32 chars, lowercase letters / digits / underscore / dash, must start alphanumeric. Tokens are shown once at creation.</p>
+  <div class="form-row">
+    <input type="text" id="new-uid" placeholder="uid" maxlength="32" autocomplete="off">
+    <input type="text" id="new-display" placeholder="display name (optional)" maxlength="64" autocomplete="off">
+    <button class="btn" type="button" onclick="createUser()">Create</button>
+  </div>
+  <p id="status"></p>
+</div>
+
+<div class="card">
+  <h2>[ Users ]</h2>
+  <table id="user-table">
+    <thead><tr>
+      <th>UID</th><th>Display</th><th>Auth</th><th>Session</th><th></th>
+    </tr></thead>
+    <tbody><tr><td colspan="5" style="color:#666;">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <a class="btn full" href="/play">&#9654; Back to game</a>
+  <a class="btn full" href="/account" style="border-color:#666;color:#888;">Back to account</a>
+</div>
+
+<div id="token-modal" class="modal" role="dialog" aria-modal="true">
+  <div class="card">
+    <h2 id="token-title">[ Token ]</h2>
+    <p class="hint">Copy this now — it cannot be recovered. Share privately with the user.</p>
+    <div class="token-box" id="token-value"></div>
+    <button class="btn" type="button" onclick="copyToken()">Copy</button>
+    <button class="btn" type="button" onclick="closeTokenModal()" style="margin-left:0.4rem;">Done</button>
+    <p id="copy-status" class="hint" style="margin-top:0.6rem;"></p>
+  </div>
+</div>
+
+<script>
+const status = () => document.getElementById('status');
+
+function setStatus(msg, cls) {
+  const el = status();
+  el.className = cls || '';
+  el.textContent = msg || '';
+}
+
+function showToken(uid, raw, kind) {
+  document.getElementById('token-title').textContent = '[ ' + kind + ' for ' + uid + ' ]';
+  document.getElementById('token-value').textContent = raw;
+  document.getElementById('copy-status').textContent = '';
+  document.getElementById('token-modal').classList.add('show');
+}
+function closeTokenModal() {
+  document.getElementById('token-modal').classList.remove('show');
+}
+async function copyToken() {
+  const raw = document.getElementById('token-value').textContent;
+  try {
+    await navigator.clipboard.writeText(raw);
+    document.getElementById('copy-status').textContent = 'Copied to clipboard.';
+  } catch (e) {
+    document.getElementById('copy-status').textContent = 'Copy failed — select the token manually.';
+  }
+}
+
+async function loadUsers() {
+  const tbody = document.querySelector('#user-table tbody');
+  try {
+    const r = await fetch('/admin/users');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const users = await r.json();
+    tbody.innerHTML = '';
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:#666;">No users.</td></tr>';
+      return;
+    }
+    for (const u of users) {
+      const tr = document.createElement('tr');
+
+      const uidCell = document.createElement('td');
+      uidCell.textContent = u.uid;
+      if (u.is_admin) {
+        uidCell.appendChild(document.createTextNode(' '));
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.textContent = 'ADMIN';
+        uidCell.appendChild(b);
+      }
+      tr.appendChild(uidCell);
+
+      const dispCell = document.createElement('td');
+      dispCell.textContent = u.display_name || '';
+      dispCell.style.color = '#aaa';
+      tr.appendChild(dispCell);
+
+      const authCell = document.createElement('td');
+      const tags = [];
+      if (u.has_token) tags.push('token');
+      if (u.has_oidc) tags.push('oidc');
+      if (u.passkey_count) tags.push(u.passkey_count + ' passkey' + (u.passkey_count > 1 ? 's' : ''));
+      authCell.textContent = tags.join(', ') || '—';
+      authCell.style.color = '#888';
+      authCell.style.fontSize = '0.8rem';
+      tr.appendChild(authCell);
+
+      const sessCell = document.createElement('td');
+      const sb = document.createElement('span');
+      sb.className = 'badge ' + (u.has_active_container ? 'active' : 'muted');
+      sb.textContent = u.has_active_container ? 'RUNNING' : 'idle';
+      sessCell.appendChild(sb);
+      tr.appendChild(sessCell);
+
+      const actCell = document.createElement('td');
+      actCell.className = 'actions';
+      const rotateBtn = document.createElement('button');
+      rotateBtn.className = 'btn';
+      rotateBtn.type = 'button';
+      rotateBtn.textContent = 'Rotate token';
+      rotateBtn.onclick = () => rotateToken(u.uid);
+      actCell.appendChild(rotateBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn danger';
+      delBtn.type = 'button';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = () => deleteUser(u.uid);
+      actCell.appendChild(delBtn);
+      tr.appendChild(actCell);
+
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="err">Could not load users: ' + e.message + '</td></tr>';
+  }
+}
+
+async function createUser() {
+  const uidEl = document.getElementById('new-uid');
+  const dispEl = document.getElementById('new-display');
+  const uid = uidEl.value.trim();
+  const display = dispEl.value.trim();
+  if (!uid) { setStatus('Enter a UID.', 'err'); return; }
+  setStatus('Creating ' + uid + '…');
+  try {
+    const r = await fetch('/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, display_name: display })
+    });
+    if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
+    const out = await r.json();
+    setStatus('Created ' + out.uid + '.', 'ok');
+    uidEl.value = '';
+    dispEl.value = '';
+    showToken(out.uid, out.raw_token, 'Access token');
+    loadUsers();
+  } catch (e) {
+    setStatus('Create failed: ' + e.message.trim(), 'err');
+  }
+}
+
+async function rotateToken(uid) {
+  if (!confirm('Rotate token for ' + uid + '? Their existing token will stop working.')) return;
+  setStatus('Rotating ' + uid + '…');
+  try {
+    const r = await fetch('/admin/users/' + encodeURIComponent(uid) + '/rotate', { method: 'POST' });
+    if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
+    const out = await r.json();
+    setStatus('Rotated.', 'ok');
+    showToken(out.uid, out.raw_token, 'New token');
+  } catch (e) {
+    setStatus('Rotate failed: ' + e.message.trim(), 'err');
+  }
+}
+
+async function deleteUser(uid) {
+  if (!confirm('Delete user ' + uid + '?\n\nThis stops their running container, removes their save directory, and deletes their account. This cannot be undone.')) return;
+  setStatus('Deleting ' + uid + '…');
+  try {
+    const r = await fetch('/admin/users/' + encodeURIComponent(uid), { method: 'DELETE' });
+    if (r.status === 503) { setStatus('Could not stop their container — try again in a moment.', 'err'); return; }
+    if (r.status === 400) { setStatus((await r.text()).trim() || 'Refused.', 'err'); return; }
+    if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
+    setStatus('Deleted ' + uid + '.', 'ok');
+    loadUsers();
+  } catch (e) {
+    setStatus('Delete failed: ' + e.message.trim(), 'err');
+  }
+}
+
+loadUsers();
+</script>
+</body>
+</html>
