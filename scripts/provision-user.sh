@@ -42,6 +42,10 @@ if [ "$nonzero" -gt 1 ]; then
     echo "Error: --rotate, --promote, and --demote are mutually exclusive." >&2
     exit 1
 fi
+if [ "$CREATE_ADMIN" = "1" ] && [ "$nonzero" -gt 0 ]; then
+    echo "Error: --admin is for create mode only; remove it when using --rotate/--promote/--demote." >&2
+    exit 1
+fi
 
 UID_ARG="${1:?Usage: $0 [--rotate|--promote|--demote|--admin] <uid> [display_name]}"
 DISPLAY_NAME="${2:-$UID_ARG}"

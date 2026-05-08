@@ -339,8 +339,13 @@ func (s *UserStore) All() []*User {
 	defer s.mu.RUnlock()
 	out := make([]*User, 0, len(s.users))
 	for _, u := range s.users {
-		// Copy so callers can't mutate the live map entries.
+		// Deep copy: the shallow `cp := *u` aliases u.Passkeys' backing array,
+		// so a future caller iterating result entries could mutate live store
+		// state without holding the lock.
 		cp := *u
+		if u.Passkeys != nil {
+			cp.Passkeys = append([]PasskeyCredential(nil), u.Passkeys...)
+		}
 		out = append(out, &cp)
 	}
 	return out

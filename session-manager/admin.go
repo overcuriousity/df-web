@@ -189,13 +189,24 @@ func (m *Manager) adminDeleteUser(w http.ResponseWriter, r *http.Request, uid st
 
 	// Step 1: stop and clear any running container. Mirror the flag-then-stop
 	// sequence in handleSessionStop so a parallel /play cannot rerun docker rm
-	// against a half-removed user.
+	// against a half-removed user. Verify the container is actually running
+	// first — a stale entry left by a DF crash should be cleared, not stopped
+	// (dockerStop on a vanished container would otherwise wedge the delete).
 	m.mu.Lock()
 	ci, hasContainer := m.containers[uid]
 	if hasContainer {
 		ci.stopping = true
 	}
 	m.mu.Unlock()
+	if hasContainer && !dockerIsRunning(ci.id) {
+		log.Printf("admin: clearing stale container entry %s for %s", ci.id[:12], uid)
+		m.mu.Lock()
+		if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+			delete(m.containers, uid)
+		}
+		m.mu.Unlock()
+		hasContainer = false
+	}
 	if hasContainer {
 		log.Printf("admin: stopping container %s for delete of %s", ci.id[:12], uid)
 		if err := dockerStop(ci.id); err != nil {

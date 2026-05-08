@@ -189,7 +189,14 @@ async function loadUsers() {
       tbody.appendChild(tr);
     }
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="5" class="err">Could not load users: ' + e.message + '</td></tr>';
+    tbody.textContent = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.className = 'err';
+    td.textContent = 'Could not load users: ' + (e && e.message ? e.message : String(e));
+    tr.appendChild(td);
+    tbody.appendChild(tr);
   }
 }
 

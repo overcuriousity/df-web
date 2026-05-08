@@ -64,7 +64,9 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 		m.mu.Unlock()
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxImportUploadBytes+1<<20)
+	// 64 KiB headroom for multipart framing — boundary, headers, and the small
+	// trailing CRLFs add up to a few KiB at most.
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportUploadBytes+64<<10)
 
 	// Stream the multipart file part directly to disk. We avoid
 	// ParseMultipartForm because it spools >memMax bytes to os.TempDir() —
@@ -77,9 +79,19 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stagingDir := filepath.Join(m.cfg.SavesRoot, uid, ".import-staging")
-	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
-		log.Printf("import: mkdir staging for %s: %v", uid, err)
+	// Per-request staging dir under the user's saves root. Two concurrent
+	// imports for the same uid (double-click, two tabs) must not race on a
+	// shared path or a defer-RemoveAll could unlink the other request's tmp
+	// files mid-extract.
+	userRoot := filepath.Join(m.cfg.SavesRoot, uid)
+	if err := os.MkdirAll(userRoot, 0o700); err != nil {
+		log.Printf("import: mkdir user root for %s: %v", uid, err)
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	stagingDir, err := os.MkdirTemp(userRoot, ".import-")
+	if err != nil {
+		log.Printf("import: staging tempdir for %s: %v", uid, err)
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
@@ -183,10 +195,23 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pick the next free regionN slot under data/save/.
+	// Pick the next free regionN slot under data/save/. ensureUserDirs covers
+	// data/, config/, and tilesets/ at 1000:1000; we still need to chown the
+	// save/ subdir explicitly because MkdirAll will create it root-owned for a
+	// brand-new user importing before their first /play.
+	if err := ensureUserDirs(m.cfg.SavesRoot, uid); err != nil {
+		log.Printf("import: ensureUserDirs for %s: %v", uid, err)
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
 	saveRoot := filepath.Join(userDataDir(m.cfg.SavesRoot, uid), "save")
 	if err := os.MkdirAll(saveRoot, 0o700); err != nil {
 		log.Printf("import: mkdir save dir for %s: %v", uid, err)
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	if err := os.Chown(saveRoot, 1000, 1000); err != nil {
+		log.Printf("import: chown save dir for %s: %v", uid, err)
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
@@ -207,10 +232,16 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Match the ownership/permissions used by ensureUserDirs so DF (uid 1000
-	// in-container) can read+write the new region.
+	// in-container) can read+write the new region. Treat failure as fatal and
+	// roll back the install: a 200 here would leave the user with a region
+	// they can't actually load.
 	if err := chownTree(targetPath, 1000, 1000); err != nil {
 		log.Printf("import: chown tree %s: %v", targetPath, err)
-		// Non-fatal: the data is in place. Surface a warning but still 200.
+		if rmErr := os.RemoveAll(targetPath); rmErr != nil {
+			log.Printf("import: rollback %s after chown failure: %v", targetPath, rmErr)
+		}
+		http.Error(w, "could not finalise save permissions", http.StatusInternalServerError)
+		return
 	}
 
 	log.Printf("import: %s installed %s (%d files, %d bytes)", uid, target, fileCount, byteCount)
@@ -252,14 +283,29 @@ func validateEntryName(name string) (string, error) {
 	name = strings.ReplaceAll(name, `\`, `/`)
 	name = strings.TrimPrefix(name, "./")
 	name = strings.TrimPrefix(name, "/")
-	if strings.Contains(name, "..") {
-		return "", fmt.Errorf("path traversal in entry %q", name)
-	}
 	clean := path.Clean(name)
-	if strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, "..") {
-		return "", fmt.Errorf("unsafe entry path %q", name)
+	if strings.HasPrefix(clean, "/") {
+		return "", fmt.Errorf("absolute path in entry %q", name)
+	}
+	// Reject ".." as a path *element* (so foo..bar is fine, foo/../bar is not).
+	for _, comp := range strings.Split(clean, "/") {
+		if comp == ".." {
+			return "", fmt.Errorf("path traversal in entry %q", name)
+		}
 	}
 	return clean, nil
+}
+
+// isMetadataEntry skips noise that filesystem GUIs add to archives — currently
+// macOS Finder's __MACOSX/ resource forks and .DS_Store sentinels. Treating
+// these as if they weren't in the archive lets us still enforce
+// "exactly one top-level region folder" without rejecting macOS-zipped saves.
+func isMetadataEntry(p string) bool {
+	if strings.HasPrefix(p, "__MACOSX/") || p == "__MACOSX" {
+		return true
+	}
+	base := path.Base(p)
+	return base == ".DS_Store" || strings.HasPrefix(base, "._")
 }
 
 // topLevelComponent returns the first path component of a forward-slash path.
@@ -292,6 +338,11 @@ func extractZip(zipPath, destDir string) (string, int, int64, error) {
 		}
 		// Skip pure directory entries that resolve to "." after cleaning.
 		if clean == "." || clean == "" {
+			continue
+		}
+		// Skip macOS Finder noise so a zip that was built on a Mac doesn't
+		// trip the "multiple top-level entries" check below.
+		if isMetadataEntry(clean) {
 			continue
 		}
 		root := topLevelComponent(clean)
@@ -355,11 +406,21 @@ func extractTarGz(tgzPath, destDir string) (string, int, int64, error) {
 		if err != nil {
 			return "", 0, 0, fmt.Errorf("malformed tar: %w", err)
 		}
+		// PAX/GNU metadata records carry no file data we want; the headers
+		// they describe will appear as the next entry. Skip without
+		// validating the name (PAX records use synthetic ./PaxHeader paths).
+		switch hdr.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			continue
+		}
 		clean, err := validateEntryName(hdr.Name)
 		if err != nil {
 			return "", 0, 0, err
 		}
 		if clean == "." || clean == "" {
+			continue
+		}
+		if isMetadataEntry(clean) {
 			continue
 		}
 		root := topLevelComponent(clean)
