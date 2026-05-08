@@ -143,8 +143,29 @@ func (m *Manager) handleAccount(w http.ResponseWriter, r *http.Request) {
 	_ = tmpl.Execute(w, data)
 }
 
-// handleLogout clears the session cookie and redirects home.
+// handleLogout stops any active container for the user, clears the session
+// cookie, and redirects home.
 func (m *Manager) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if uid, _ := m.sessionUID(r); uid != "" {
+		m.mu.Lock()
+		ci, ok := m.containers[uid]
+		if ok {
+			ci.stopping = true
+		}
+		m.mu.Unlock()
+		if ok {
+			log.Printf("logout: stopping container %s for user %s", ci.id[:12], uid)
+			if err := dockerStop(ci.id); err != nil {
+				log.Printf("logout: stop container for user %s: %v", uid, err)
+			}
+			m.stopSessionLog(uid)
+			m.mu.Lock()
+			if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+				delete(m.containers, uid)
+			}
+			m.mu.Unlock()
+		}
+	}
 	m.clearSession(w)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
