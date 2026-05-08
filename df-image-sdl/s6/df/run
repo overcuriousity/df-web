@@ -12,6 +12,9 @@ cd /opt/df
 # Apply user-uploaded tilesets and selection. Non-fatal on error.
 /apply-tilesets.sh || true
 
+# Redirect gamelog.txt into the bind-mounted save dir for host-side tailing.
+/link-gamelog.sh || true
+
 # On SIGTERM (sent by s6 during container shutdown) send the in-game quit-save
 # key sequence, then wait for DF to finish writing the save before exiting.
 # s6 sends SIGTERM only to this shell's PID, not to the DF process group, so DF
@@ -23,7 +26,12 @@ _quit() {
 }
 trap _quit TERM
 
-./dwarfort &
+# Launch through DFHack if installed, otherwise run DF directly.
+if [ -x /opt/df/dfhack ]; then
+    ./dfhack &
+else
+    ./dwarfort &
+fi
 DF_PID=$!
 
 # Without a window manager, DF's SDL2 window never receives X11 input focus,

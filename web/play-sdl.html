@@ -13,10 +13,75 @@
   #fs-hint { color: #c8a870; font-size: 0.8rem; }
   #idle-chip { display: none; font-size: 0.8rem; color: #c8a870; }
   #idle-chip.warn { color: #c06060; }
-  #novnc-frame { flex: 1; width: 100%; border: none; }
-  #audio-btn { background: none; border: none; color: #8b7355; cursor: pointer;
+  #audio-btn, #sidebar-btn { background: none; border: none; color: #8b7355; cursor: pointer;
                font-family: inherit; font-size: 0.85rem; padding: 0; }
-  #audio-btn:hover { color: #c8a870; }
+  #audio-btn:hover, #sidebar-btn:hover { color: #c8a870; }
+
+  /* Main content row: game + sidebar */
+  #main-row { flex: 1; display: flex; overflow: hidden; }
+  #novnc-frame { flex: 1; border: none; min-width: 0; }
+
+  /* Sidebar */
+  #sidebar { width: 0; overflow: hidden; background: #1a1a1a; border-left: 1px solid #3a3028;
+             display: flex; flex-direction: column; transition: width 0.15s ease; font-family: monospace; }
+  #sidebar.open { width: 340px; }
+  #sidebar-inner { width: 340px; display: flex; flex-direction: column; height: 100%; }
+  #sidebar-tabs { display: flex; border-bottom: 1px solid #3a3028; flex-shrink: 0; }
+  .stab { flex: 1; padding: 0.45rem 0.3rem; text-align: center; cursor: pointer; font-size: 0.8rem;
+          color: #888; border-bottom: 2px solid transparent; }
+  .stab.active { color: #c8a870; border-bottom-color: #c8a870; }
+  .stab:hover:not(.active) { color: #d0c8b0; }
+  #sidebar-content { flex: 1; overflow-y: auto; padding: 0.7rem; }
+
+  /* Save selector */
+  .save-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.7rem; }
+  .save-row label { font-size: 0.75rem; color: #888; white-space: nowrap; }
+  .save-row select { flex: 1; background: #242018; color: #d0c8b0; border: 1px solid #3a3028;
+                     border-radius: 2px; padding: 0.2rem 0.3rem; font-family: inherit; font-size: 0.8rem; }
+
+  /* Journal */
+  #journal-area { width: 100%; height: 260px; background: #100e0c; color: #d0c8b0;
+                  border: 1px solid #3a3028; border-radius: 2px; padding: 0.5rem;
+                  font-family: inherit; font-size: 0.82rem; line-height: 1.5; resize: vertical; }
+  #journal-area:focus { outline: 1px solid #8b7355; }
+  .journal-footer { margin-top: 0.4rem; display: flex; gap: 0.5rem; align-items: center; }
+  .btn-sm { padding: 0.3rem 0.7rem; background: #3a3028; color: #d0c8b0; border: 1px solid #8b7355;
+            border-radius: 2px; cursor: pointer; font-family: inherit; font-size: 0.8rem; }
+  .btn-sm:hover { background: #5a4a38; }
+  .btn-sm.primary { background: #5a4a30; border-color: #c8a870; color: #f0d090; }
+  .status-msg { font-size: 0.75rem; color: #888; }
+  .ok { color: #70c070; } .err { color: #c06060; }
+
+  /* Timeline */
+  .tl-event { padding: 0.35rem 0; border-bottom: 1px solid #2a2420; font-size: 0.8rem; line-height: 1.3; }
+  .tl-event:last-child { border-bottom: none; }
+  .tl-time { font-size: 0.7rem; color: #555; display: block; }
+  .tl-raw  { color: #c8b890; }
+  .tl-kind { font-size: 0.65rem; border-radius: 2px; padding: 0.05rem 0.3rem; margin-right: 0.3rem;
+             display: inline-block; vertical-align: middle; }
+  .k-siege    { background: #5a1a1a; color: #e08080; }
+  .k-death    { background: #2a1a2a; color: #c080c0; }
+  .k-artifact { background: #1a3020; color: #80c080; }
+  .k-mood     { background: #3a2010; color: #e0a060; }
+  .k-migration{ background: #1a2a3a; color: #80b0e0; }
+  .k-season   { background: #2a2810; color: #c0b870; }
+  .k-other    { background: #2a2a2a; color: #888; }
+  #tl-status  { font-size: 0.75rem; color: #888; margin-bottom: 0.4rem; }
+  #tl-empty   { color: #666; font-size: 0.8rem; font-style: italic; padding-top: 0.5rem; }
+
+  /* Dwarves */
+  #dwarf-status { font-size: 0.75rem; color: #888; margin-bottom: 0.4rem; }
+  .dwarf-row { border-bottom: 1px solid #2a2420; padding: 0.4rem 0; }
+  .dwarf-name { font-size: 0.82rem; color: #c8a870; cursor: pointer; }
+  .dwarf-name::before { content: '▶ '; font-size: 0.7rem; color: #555; }
+  .dwarf-name.open::before { content: '▼ '; }
+  .dwarf-prof { font-size: 0.72rem; color: #888; margin-left: 0.8rem; }
+  .labor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.15rem 0.5rem;
+                margin: 0.4rem 0 0.2rem 0.8rem; }
+  .labor-item { display: flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: #aaa; }
+  .labor-item input { accent-color: #8b7355; cursor: pointer; }
+
+  /* Dialogs */
   #idle-warning, #session-ended { background: #242018; color: #d0c8b0; border: 1px solid #c8a870; border-radius: 4px;
                   padding: 1.2rem 1.5rem; max-width: 420px; font-family: monospace; }
   #idle-warning::backdrop, #session-ended::backdrop { background: rgba(0,0,0,0.7); }
@@ -45,23 +110,74 @@
   <span id="idle-chip"></span>
   <span style="margin-left:auto; display:flex; gap:1rem; align-items:center">
     <button id="audio-btn" onclick="toggleAudio()">&#128263; Audio off</button>
+    <button id="sidebar-btn" onclick="toggleSidebar()">&#128221; Journal</button>
     <a class="bay12-support" href="https://www.bay12games.com/support.html"
        target="_blank" rel="noopener">&#9733; Buy / donate</a>
     <a href="/account">Account</a>
     <a href="/auth/logout">Logout</a>
   </span>
 </div>
-<!-- Audio streamed from the container via /play/audio (WebM/Opus). -->
+
 <audio id="game-audio" style="display:none"></audio>
 
-<!-- noVNC served by websockify in the container, proxied through /play. -->
-<!-- reconnect is intentionally OFF: an unattended tab must not keep the
-     server-side container warm forever by re-spawning it on each reaper kill.
-     If the WS drops we surface the "session ended" overlay and let the user
-     opt back in. -->
-<iframe id="novnc-frame"
-        src="/novnc/vnc.html?autoconnect=true&reconnect=false&path=/play&resize=scale&show_dot=false&bell=false"
-        allowfullscreen></iframe>
+<div id="main-row">
+  <!-- noVNC served by websockify in the container, proxied through /play. -->
+  <!-- reconnect is intentionally OFF: an unattended tab must not keep the
+       server-side container warm forever by re-spawning it on each reaper kill.
+       If the WS drops we surface the "session ended" overlay and let the user
+       opt back in. -->
+  <iframe id="novnc-frame"
+          src="/novnc/vnc.html?autoconnect=true&reconnect=false&path=/play&resize=scale&show_dot=false&bell=false"
+          allowfullscreen></iframe>
+
+  <!-- Storyteller sidebar: Journal, Timeline, Dwarves -->
+  <div id="sidebar">
+    <div id="sidebar-inner">
+      <div id="sidebar-tabs">
+        <span class="stab active" data-tab="journal" onclick="switchSTab('journal')">Journal</span>
+        <span class="stab" data-tab="timeline" onclick="switchSTab('timeline')">Timeline</span>
+        <span class="stab" id="dwarves-tab" data-tab="dwarves" onclick="switchSTab('dwarves')" style="display:none">Dwarves</span>
+      </div>
+
+      <!-- Save selector (shared across tabs) -->
+      <div style="padding: 0.5rem 0.7rem 0; flex-shrink:0;">
+        <div class="save-row">
+          <label>Fortress:</label>
+          <select id="save-sel" onchange="onSaveChange()"><option value="">loading…</option></select>
+        </div>
+      </div>
+
+      <div id="sidebar-content">
+
+        <!-- Journal tab -->
+        <div id="tab-journal">
+          <textarea id="journal-area" placeholder="Write your fortress story here…"></textarea>
+          <div class="journal-footer">
+            <button class="btn-sm primary" onclick="saveJournal()">Save</button>
+            <span id="journal-status" class="status-msg"></span>
+            <a href="/legends" target="_blank" style="margin-left:auto;font-size:0.75rem;color:#8b7355;text-decoration:none;">Legends &#8599;</a>
+          </div>
+        </div>
+
+        <!-- Timeline tab -->
+        <div id="tab-timeline" style="display:none">
+          <div id="tl-status">Connecting…</div>
+          <div id="tl-list"></div>
+          <div id="tl-empty" style="display:none">No events yet — play for a while.</div>
+        </div>
+
+        <!-- Dwarves tab -->
+        <div id="tab-dwarves" style="display:none">
+          <div id="dwarf-status">
+            <button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button>
+          </div>
+          <div id="dwarf-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
 
 <dialog id="session-ended">
   <h3>[ Session ended ]</h3>
@@ -83,7 +199,7 @@
 </dialog>
 
 <script>
-// Keyboard Lock API — exclusive capture of system keys in fullscreen (Chromium only).
+// ---- Keyboard lock + fullscreen -----------------------------------------------
 async function requestKeyboardLock() {
   if (navigator.keyboard && navigator.keyboard.lock) {
     try {
@@ -96,19 +212,17 @@ async function requestKeyboardLock() {
     }
   }
 }
-
 document.addEventListener('fullscreenchange', () => {
   if (document.fullscreenElement) requestKeyboardLock();
 });
 
+// ---- Audio --------------------------------------------------------------------
 let audioEnabled = false;
 const audioEl = document.getElementById('game-audio');
 const audioBtn = document.getElementById('audio-btn');
-
 function toggleAudio() {
   if (audioEnabled) {
-    audioEl.pause();
-    audioEl.src = '';
+    audioEl.pause(); audioEl.src = '';
     audioEnabled = false;
     audioBtn.textContent = '\u{1F507} Audio off';
   } else {
@@ -119,56 +233,44 @@ function toggleAudio() {
   }
 }
 
-// Track the last real user input so we only bump the idle timer when
-// someone is actually playing. Server-side proxy no longer counts frames.
+// ---- Keepalive ----------------------------------------------------------------
 let lastInputAt = Date.now();
 function noteInput() { lastInputAt = Date.now(); }
 
 const novncFrame = document.getElementById('novnc-frame');
 novncFrame.addEventListener('load', () => {
-  document.getElementById('fs-hint').textContent =
-    'Click inside the game, then F11 for fullscreen.';
-  // Focus the iframe so keyboard events flow to noVNC immediately.
+  document.getElementById('fs-hint').textContent = 'Click inside the game, then F11 for fullscreen.';
   novncFrame.contentWindow.focus();
-  // First paint resets the idle clock — handy if the user reloaded /play.
   fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
   noteInput();
-
-  // Same-origin iframe: hook real input events so we know when the user
-  // is doing something, separate from raw VNC frames flowing back.
   try {
     const doc = novncFrame.contentDocument;
     if (doc) {
       ['keydown', 'mousedown', 'wheel', 'touchstart'].forEach(ev =>
         doc.addEventListener(ev, noteInput, { capture: true, passive: true }));
     }
-  } catch (_) { /* cross-origin shouldn't happen, but don't break if it does */ }
+  } catch (_) {}
 });
 
-// Drive keepalive from the client on real input. If the user has touched
-// anything in the last 90 s, refresh the lease every 60 s; otherwise stay
-// quiet and let the server reap.
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   if (Date.now() - lastInputAt > 90_000) return;
   fetch('/session/keepalive', { method: 'POST' }).catch(() => {});
 }, 60_000);
 
-// ---- Idle countdown + warning -------------------------------------------------
-
+// ---- Idle warning -------------------------------------------------------------
 const idleChip = document.getElementById('idle-chip');
 const idleWarning = document.getElementById('idle-warning');
 const idleWarningSecs = document.getElementById('idle-warning-secs');
 const sessionEnded = document.getElementById('session-ended');
-const WARNING_THRESHOLD = 120; // seconds — show modal when ≤2 min left
+const WARNING_THRESHOLD = 120;
 let pollTimer = null;
 let warningDismissed = false;
 
 function fmtRemaining(s) {
   if (s <= 0) return 'session ended';
   if (s < 60) return s + 's left';
-  const m = Math.floor(s / 60);
-  const r = s % 60;
+  const m = Math.floor(s / 60), r = s % 60;
   if (s < 300) return '⚠ ' + m + 'm ' + r + 's left';
   return '⌛ ' + m + 'm left';
 }
@@ -180,8 +282,6 @@ async function pollSessionStatus() {
     const s = await r.json();
     if (!s.active) {
       idleChip.style.display = 'none';
-      // No live container — server reaped us, or we never had one.
-      // Surface the resume overlay so the user can opt back in deliberately.
       if (idleWarning.open) idleWarning.close();
       if (!sessionEnded.open) sessionEnded.showModal();
       schedulePoll(15000);
@@ -191,7 +291,6 @@ async function pollSessionStatus() {
     idleChip.style.display = 'inline';
     idleChip.textContent = fmtRemaining(s.seconds_until_reap);
     idleChip.classList.toggle('warn', s.seconds_until_reap <= 300);
-
     if (s.seconds_until_reap <= WARNING_THRESHOLD && !warningDismissed) {
       idleWarningSecs.textContent = String(s.seconds_until_reap);
       if (!idleWarning.open) idleWarning.showModal();
@@ -200,43 +299,331 @@ async function pollSessionStatus() {
       if (idleWarning.open) idleWarning.close();
       schedulePoll(30000);
     }
-  } catch (_) { /* network blip — next tick will retry */ }
+  } catch (_) {}
 }
 
 function schedulePoll(ms) {
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = setTimeout(pollSessionStatus, ms);
 }
-
 async function keepPlaying() {
   try { await fetch('/session/keepalive', { method: 'POST' }); } catch (_) {}
   warningDismissed = false;
   if (idleWarning.open) idleWarning.close();
   pollSessionStatus();
 }
-
 function dismissWarning() {
   warningDismissed = true;
   if (idleWarning.open) idleWarning.close();
   schedulePoll(30000);
 }
-
-// Reload the page: /play (non-WS) is the one path that spawns a fresh
-// container, so a full reload is the cleanest way to resume after a reap.
-function resumeSession() {
-  window.location.reload();
-}
+function resumeSession() { window.location.reload(); }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    pollSessionStatus();
-  } else if (pollTimer) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
+  if (document.visibilityState === 'visible') pollSessionStatus();
+  else if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+});
+pollSessionStatus();
+
+// ---- Sidebar ------------------------------------------------------------------
+let sidebarOpen = false;
+let currentSTab = 'journal';
+let currentSave = '';
+let sseSource = null;
+let journalDirty = false;
+let journalSaveTimer = null;
+let dfhackEnabled = false;
+
+async function fetchCapabilities() {
+  try {
+    const r = await fetch('/session/capabilities');
+    if (r.ok) {
+      const caps = await r.json();
+      dfhackEnabled = !!caps.dfhack;
+      document.getElementById('dwarves-tab').style.display = dfhackEnabled ? '' : 'none';
+    }
+  } catch (_) {}
+}
+
+function toggleSidebar() {
+  sidebarOpen = !sidebarOpen;
+  document.getElementById('sidebar').classList.toggle('open', sidebarOpen);
+  if (sidebarOpen) {
+    fetchCapabilities();
+    loadSaves();
+  } else {
+    // Return focus to game
+    novncFrame.contentWindow?.focus();
   }
+}
+
+function switchSTab(tab) {
+  currentSTab = tab;
+  document.querySelectorAll('.stab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('tab-journal').style.display = tab === 'journal' ? '' : 'none';
+  document.getElementById('tab-timeline').style.display = tab === 'timeline' ? '' : 'none';
+  document.getElementById('tab-dwarves').style.display = tab === 'dwarves' ? '' : 'none';
+  if (tab === 'timeline') startTimeline();
+  if (tab === 'dwarves') loadDwarves();
+}
+
+// ---- Save selector ------------------------------------------------------------
+async function loadSaves() {
+  try {
+    const r = await fetch('/play/saves');
+    const saves = await r.json() || [];
+    const sel = document.getElementById('save-sel');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    if (!saves.length) {
+      sel.innerHTML = '<option value="">(no saves yet)</option>';
+      return;
+    }
+    for (const s of saves) {
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      opt.textContent = s.name + (s.has_journal ? ' ✎' : '');
+      sel.appendChild(opt);
+    }
+    // Prefer the most-recently-modified save (first in list, sorted by mtime desc server-side)
+    sel.value = prev && saves.find(s => s.name === prev) ? prev : saves[0].name;
+    onSaveChange();
+  } catch (_) {}
+}
+
+function onSaveChange() {
+  const sel = document.getElementById('save-sel');
+  currentSave = sel.value;
+  if (currentSTab === 'journal') loadJournal();
+  if (currentSTab === 'timeline') startTimeline();
+  if (currentSTab === 'dwarves') loadDwarves();
+}
+
+// ---- Journal ------------------------------------------------------------------
+async function loadJournal() {
+  if (!currentSave) return;
+  try {
+    const r = await fetch(`/play/journal?save=${encodeURIComponent(currentSave)}`);
+    document.getElementById('journal-area').value = r.ok ? await r.text() : '';
+    journalDirty = false;
+    setJournalStatus('');
+  } catch (_) { setJournalStatus('Error loading journal.', true); }
+}
+
+document.getElementById('journal-area').addEventListener('input', () => {
+  journalDirty = true;
+  clearTimeout(journalSaveTimer);
+  journalSaveTimer = setTimeout(saveJournalAuto, 5000);
 });
 
-pollSessionStatus();
+async function saveJournal() {
+  if (!currentSave) return;
+  clearTimeout(journalSaveTimer);
+  const text = document.getElementById('journal-area').value;
+  try {
+    const r = await fetch(`/play/journal?save=${encodeURIComponent(currentSave)}`, {
+      method: 'PUT', body: text, headers: { 'Content-Type': 'text/markdown' }
+    });
+    if (!r.ok) throw new Error(await r.text());
+    journalDirty = false;
+    setJournalStatus('Saved.', false, 2000);
+  } catch (e) { setJournalStatus('Save failed: ' + e.message, true); }
+}
+
+function saveJournalAuto() { if (journalDirty) saveJournal(); }
+
+function setJournalStatus(msg, isErr, clearAfter) {
+  const el = document.getElementById('journal-status');
+  el.textContent = msg;
+  el.className = 'status-msg' + (isErr ? ' err' : ' ok');
+  if (clearAfter) setTimeout(() => { el.textContent = ''; }, clearAfter);
+}
+
+// ---- Timeline -----------------------------------------------------------------
+function startTimeline() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  const status = document.getElementById('tl-status');
+  const list = document.getElementById('tl-list');
+  const empty = document.getElementById('tl-empty');
+  status.textContent = 'Connecting to event stream…';
+  list.innerHTML = '';
+  empty.style.display = 'none';
+
+  sseSource = new EventSource('/play/timeline');
+  sseSource.onopen = () => { status.textContent = 'Live'; };
+  sseSource.onerror = () => { status.textContent = 'Disconnected.'; };
+  sseSource.onmessage = (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      prependEvent(ev);
+      empty.style.display = 'none';
+    } catch (_) {}
+  };
+  sseSource.addEventListener('session-ended', () => {
+    status.textContent = 'Session ended.';
+    sseSource.close();
+  });
+
+  // Show empty state after 3 s if no events arrived
+  setTimeout(() => {
+    if (!list.firstChild) empty.style.display = '';
+  }, 3000);
+}
+
+const KIND_CLASS = { siege:'k-siege', death:'k-death', artifact:'k-artifact',
+                     mood:'k-mood', migration:'k-migration', season:'k-season', other:'k-other' };
+
+function prependEvent(ev) {
+  const list = document.getElementById('tl-list');
+  const div = document.createElement('div');
+  div.className = 'tl-event';
+  const t = new Date(ev.ts);
+  const timeStr = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const kindCls = KIND_CLASS[ev.kind] || 'k-other';
+  div.innerHTML = `<span class="tl-kind ${kindCls}">${esc(ev.kind)}</span><span class="tl-raw">${esc(ev.raw)}</span><span class="tl-time">${timeStr}</span>`;
+  list.insertBefore(div, list.firstChild);
+  // Keep list from growing unboundedly
+  while (list.children.length > 200) list.removeChild(list.lastChild);
+}
+
+// ---- Dwarves (labor panel) ----------------------------------------------------
+// Subset of DF labor IDs mapped to names. Full list has 120 entries;
+// this covers the ones players most commonly care about.
+const LABOR_NAMES = {
+  0:'Mining', 1:'Woodcutting', 2:'Carpentry', 3:'Detailing', 4:'Masonry',
+  5:'Architecture', 6:'Dye making', 7:'Weaving', 8:'Clothing', 9:'Wood burning',
+  10:'Pottery', 11:'Glassmaking', 12:'Gem cutting', 13:'Gem setting', 14:'Metalsmithing',
+  15:'Forge armor', 16:'Forge weapons', 17:'Forge tools', 18:'Forge mechanisms',
+  19:'Blacksmithing', 20:'Strand extraction', 21:'Siege operation', 22:'Siege engineering',
+  23:'Bowyer', 24:'Medicine', 25:'Surgery', 26:'Bone setting', 27:'Suturing',
+  28:'Dressing wounds', 29:'Diagnose', 30:'Anatomy', 31:'Trapping', 32:'Stone craft',
+  33:'Bone carving', 34:'Leather work', 35:'Butchering', 36:'Tanning',
+  37:'Plant gathering', 38:'Milking', 39:'Cheese making', 40:'Cook', 41:'Brew',
+  42:'Farm plot', 43:'Herbalism', 44:'Hunting', 45:'Animal training',
+  46:'Animal care', 47:'Fish dissection', 48:'Fishing', 49:'Mechanics',
+  50:'Haul goods', 51:'Haul stone', 52:'Haul wood', 53:'Haul body',
+  54:'Haul food', 55:'Haul refuse', 56:'Haul item', 57:'Haul animals',
+  58:'Load catapult', 59:'Smelting', 60:'Fertilize', 61:'Soap making',
+  62:'Remove construction', 63:'Construct buildings', 64:'Custom reaction',
+};
+
+const LABOR_GROUPS = [
+  { label: 'Mining & Felling', ids: [0,1] },
+  { label: 'Crafting', ids: [2,3,4,5,32,33,12,13,10,11,7,8,6,23,9] },
+  { label: 'Metalwork', ids: [14,15,16,17,18,19,59] },
+  { label: 'Farming & Food', ids: [42,43,37,41,40,39,38,31,48,47] },
+  { label: 'Animals', ids: [44,45,46,35,36,34] },
+  { label: 'Medicine', ids: [24,25,26,27,28,29,30] },
+  { label: 'Hauling', ids: [50,51,52,53,54,55,56,57,58] },
+  { label: 'Construction', ids: [63,62,49,22,21,61,60] },
+];
+
+let dwarfData = [];
+let openDwarf = null;
+
+async function loadDwarves() {
+  const list = document.getElementById('dwarf-list');
+  const status = document.getElementById('dwarf-status');
+  list.innerHTML = '';
+  status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">Loading…</span>';
+  try {
+    const r = await fetch('/play/dfhack/units');
+    if (!r.ok) {
+      if (r.status === 404) {
+        status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">(session not active)</span>';
+      } else if (r.status === 503) {
+        status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#c06060;font-size:0.75rem;">DFHack unavailable — check in-game manipulator instead</span>';
+      }
+      return;
+    }
+    dwarfData = await r.json() || [];
+    status.innerHTML = `<button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">${dwarfData.length} citizens</span>`;
+    renderDwarves();
+  } catch (e) {
+    status.innerHTML = `<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#c06060;font-size:0.75rem;">${esc(e.message)}</span>`;
+  }
+}
+
+function renderDwarves() {
+  const list = document.getElementById('dwarf-list');
+  list.innerHTML = '';
+  for (const d of dwarfData) {
+    const div = document.createElement('div');
+    div.className = 'dwarf-row';
+    const header = document.createElement('div');
+    header.className = 'dwarf-name' + (openDwarf === d.id ? ' open' : '');
+    header.textContent = d.name || '(unnamed)';
+    header.onclick = () => toggleDwarf(d, header, div);
+    const prof = document.createElement('div');
+    prof.className = 'dwarf-prof';
+    prof.textContent = d.profession || '';
+    div.appendChild(header);
+    div.appendChild(prof);
+    if (openDwarf === d.id) appendLaborGrid(d, div);
+    list.appendChild(div);
+  }
+}
+
+function toggleDwarf(d, header, container) {
+  const wasOpen = openDwarf === d.id;
+  openDwarf = wasOpen ? null : d.id;
+  header.classList.toggle('open', !wasOpen);
+  // Remove existing grid
+  const old = container.querySelector('.labor-grid');
+  if (old) old.remove();
+  if (!wasOpen) appendLaborGrid(d, container);
+}
+
+function appendLaborGrid(d, container) {
+  const laborSet = new Set(d.labors || []);
+  const grid = document.createElement('div');
+  grid.className = 'labor-grid';
+  // Show only groups with known labor IDs
+  for (const group of LABOR_GROUPS) {
+    const groupLabel = document.createElement('div');
+    groupLabel.style.cssText = 'grid-column:1/-1;color:#666;font-size:0.7rem;margin-top:0.3rem;';
+    groupLabel.textContent = '— ' + group.label + ' —';
+    grid.appendChild(groupLabel);
+    for (const lid of group.ids) {
+      const item = document.createElement('label');
+      item.className = 'labor-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = laborSet.has(lid);
+      cb.dataset.unitId = d.id;
+      cb.dataset.laborId = lid;
+      cb.addEventListener('change', onLaborToggle);
+      item.appendChild(cb);
+      item.appendChild(document.createTextNode(LABOR_NAMES[lid] || 'Labor ' + lid));
+      grid.appendChild(item);
+    }
+  }
+  container.appendChild(grid);
+}
+
+async function onLaborToggle(e) {
+  const cb = e.target;
+  const unitId = parseInt(cb.dataset.unitId);
+  const laborId = parseInt(cb.dataset.laborId);
+  const enabled = cb.checked;
+  try {
+    const r = await fetch('/play/dfhack/labor', {
+      method: 'POST',
+      body: JSON.stringify({ unit_id: unitId, labor: laborId, enabled }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) {
+      cb.checked = !enabled; // revert on error
+    }
+  } catch (_) {
+    cb.checked = !enabled;
+  }
+}
+
+// ---- Utilities ----------------------------------------------------------------
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 </script>
 </body>
 </html>

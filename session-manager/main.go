@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
 
@@ -52,6 +53,11 @@ func main() {
 		}
 	}()
 
+	webDir := cfg.WebDir
+	if webDir == "" {
+		webDir = "../web"
+	}
+
 	mux := http.NewServeMux()
 
 	// Auth routes
@@ -74,14 +80,28 @@ func main() {
 	mux.Handle("/account/tilesets", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesets)))
 	mux.Handle("/account/tilesets/", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesetItem)))
 
+	// Storyteller bundle (journal + timeline + legends are always available)
+	mux.Handle("/play/saves", mgr.requireAuth(http.HandlerFunc(mgr.handleSaves)))
+	mux.Handle("/play/journal", mgr.requireAuth(http.HandlerFunc(mgr.handleJournal)))
+	mux.Handle("/play/timeline", mgr.requireAuth(http.HandlerFunc(mgr.handleTimeline)))
+	mux.Handle("/play/legends", mgr.requireAuth(http.HandlerFunc(mgr.handleLegendsIndex)))
+	mux.Handle("/play/legends/xml", mgr.requireAuth(http.HandlerFunc(mgr.handleLegendsXML)))
+	// Legends viewer page
+	mux.Handle("/legends", mgr.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(webDir, "legends.html"))
+	})))
+	// DFHack endpoints — only registered when dfhack_enabled: true in config.yml
+	if cfg.DFHackEnabled {
+		mux.Handle("/play/dfhack/units", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackUnits)))
+		mux.Handle("/play/dfhack/labor", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackSetLabor)))
+	}
+	// Capabilities endpoint: lets the frontend discover which optional features are active.
+	mux.Handle("/session/capabilities", mgr.requireAuth(http.HandlerFunc(mgr.handleCapabilities)))
+
 	// Login page is public; authenticated users are redirected to /play.
 	mux.HandleFunc("/", mgr.handleIndex)
 
 	// Static web assets
-	webDir := cfg.WebDir
-	if webDir == "" {
-		webDir = "../web"
-	}
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(webDir))))
 
 	// noVNC static files for the SDL client (served from the host installation).

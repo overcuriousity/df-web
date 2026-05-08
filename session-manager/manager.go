@@ -250,6 +250,10 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	}
 	m.containers[uid] = ci
 	log.Printf("started container %s for user %s (mode=%s addr=%s:%d)", id[:12], uid, mode, containerName, vncPort)
+
+	// Start gamelog tailer for the new session (outside the lock; tailer is self-contained).
+	go m.getOrCreateSessionLog(uid)
+
 	return ci, nil
 }
 
@@ -385,6 +389,7 @@ func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 		if err := dockerStop(ci.id); err != nil {
 			log.Printf("export: stop container for user %s: %v", uid, err)
 		}
+		m.stopSessionLog(uid)
 	}
 
 	filename := fmt.Sprintf("df-%s-%s.tar.gz", uid, time.Now().Format("2006-01-02"))
@@ -452,6 +457,16 @@ func (m *Manager) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+// handleCapabilities returns a JSON object describing which optional features
+// are active on this server. The frontend uses this to show/hide UI elements.
+func (m *Manager) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	type caps struct {
+		DFHack bool `json:"dfhack"`
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(caps{DFHack: m.cfg.DFHackEnabled})
+}
+
 // handleSessionKeepalive bumps lastSeen for the caller's container, extending
 // the idle window by IdleTimeout. Returns 204 on success, 409 if the user
 // has no active container so the frontend can show "session ended" UX.
@@ -508,6 +523,7 @@ func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 		// indeterminate state and a stuck stopping=true would lock the user
 		// out of /play forever.
 	}
+	m.stopSessionLog(uid)
 	m.mu.Lock()
 	if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
 		delete(m.containers, uid)
@@ -542,6 +558,7 @@ func (m *Manager) idleReaper() {
 			if err := dockerStop(ci.id); err != nil {
 				log.Printf("idle reap: stop %s: %v", ci.id[:12], err)
 			}
+			m.stopSessionLog(ci.uid)
 			m.mu.Lock()
 			// Only forget the entry if it's still the one we just reaped.
 			if cur, ok := m.containers[ci.uid]; ok && cur.id == ci.id {
