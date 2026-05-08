@@ -44,10 +44,9 @@ func (m *Manager) handleSaves(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type saveInfo struct {
-		Name        string    `json:"name"`
-		ModTime     time.Time `json:"mod_time"`
-		HasJournal  bool      `json:"has_journal"`
-		HasLegends  bool      `json:"has_legends"`
+		Name       string    `json:"name"`
+		ModTime    time.Time `json:"mod_time"`
+		HasJournal bool      `json:"has_journal"`
 	}
 	var saves []saveInfo
 	for _, e := range entries {
@@ -59,12 +58,10 @@ func (m *Manager) handleSaves(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_, journalErr := os.Stat(filepath.Join(dir, e.Name(), "journal.md"))
-		_, legendsErr := os.Stat(filepath.Join(dir, e.Name(), "legends.xml"))
 		saves = append(saves, saveInfo{
 			Name:       e.Name(),
 			ModTime:    info.ModTime(),
 			HasJournal: journalErr == nil,
-			HasLegends: legendsErr == nil,
 		})
 	}
 

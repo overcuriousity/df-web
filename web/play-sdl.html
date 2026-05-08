@@ -345,6 +345,10 @@ async function fetchCapabilities() {
   } catch (_) {}
 }
 
+function stopTimeline() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+}
+
 function toggleSidebar() {
   sidebarOpen = !sidebarOpen;
   document.getElementById('sidebar').classList.toggle('open', sidebarOpen);
@@ -352,12 +356,13 @@ function toggleSidebar() {
     fetchCapabilities();
     loadSaves();
   } else {
-    // Return focus to game
+    stopTimeline();
     novncFrame.contentWindow?.focus();
   }
 }
 
 function switchSTab(tab) {
+  if (currentSTab === 'timeline' && tab !== 'timeline') stopTimeline();
   currentSTab = tab;
   document.querySelectorAll('.stab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.getElementById('tab-journal').style.display = tab === 'journal' ? '' : 'none';

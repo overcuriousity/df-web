@@ -73,10 +73,13 @@ func (m *Manager) handleLegendsXML(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	info, _ := f.Stat()
+	modTime := time.Time{}
+	if info, err := f.Stat(); err == nil {
+		modTime = info.ModTime()
+	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	}
-	http.ServeContent(w, r, name, info.ModTime(), f)
+	http.ServeContent(w, r, name, modTime, f)
 }

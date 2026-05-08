@@ -1,24 +1,37 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const dfhackTimeout = 10 * time.Second
 
 // dfhackRun runs a DFHack command in the user's container and returns stdout.
 // dfhack-run sends the command over the DFHack command socket (FIFO in the container).
 func dfhackRun(uid string, args ...string) (string, error) {
 	containerName := fmt.Sprintf("df-%s", uid)
-	// Build: docker exec df-<uid> dfhack-run <args...>
 	rt := containerRuntime()
 	cmdArgs := append([]string{"exec", containerName, "dfhack-run"}, args...)
-	out, err := exec.Command(rt, cmdArgs...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), dfhackTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, rt, cmdArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("dfhack-run %v: %w", args, err)
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("dfhack-run %v: %s", args, detail)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

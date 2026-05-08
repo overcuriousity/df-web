@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 )
@@ -154,11 +154,11 @@ func startGamelogTailer(sl *sessionLog, savesRoot, uid string) {
 			if n > 0 {
 				buf = append(buf, tmp[:n]...)
 				for {
-					idx := strings.IndexByte(string(buf), '\n')
+					idx := bytes.IndexByte(buf, '\n')
 					if idx < 0 {
 						break
 					}
-					line := strings.TrimRight(string(buf[:idx]), "\r")
+					line := string(bytes.TrimRight(buf[:idx], "\r"))
 					buf = buf[idx+1:]
 					if line == "" {
 						continue
