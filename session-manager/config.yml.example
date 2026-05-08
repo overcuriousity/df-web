@@ -25,3 +25,8 @@ oidc_issuer: ""          # e.g. https://cloud.example.com
 oidc_client_id: ""
 oidc_client_secret: ""
 oidc_redirect_uri: ""    # e.g. https://df.example.com/auth/oidc/callback
+
+# DFHack integration — set to true only when df-image-sdl was built with
+# --build-arg DFHACK_VERSION=<version>. Exposes the in-browser labor panel
+# and surfaces the in-game manipulator hint. Leave false for vanilla DF.
+dfhack_enabled: false

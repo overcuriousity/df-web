@@ -25,6 +25,7 @@ type Config struct {
 	RPID        string        `yaml:"rp_id"`          // WebAuthn relying party ID (hostname)
 	RPName         string `yaml:"rp_display_name"`
 	InsecureCookie bool   `yaml:"insecure_cookie"` // set true for HTTP-only local dev
+	DFHackEnabled  bool   `yaml:"dfhack_enabled"`  // set true when df-image-sdl is built with DFHack
 }
 
 func loadConfig(path string) (*Config, error) {

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Legends — Dwarf Fortress</title>
+<style>
+  :root { --bg: #1a1a1a; --fg: #d0c8b0; --accent: #8b7355; --gold: #c8a870; --btn: #3a3028; --btn-hover: #5a4a38; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: 'Courier New', monospace; padding: 1.5rem; }
+  h1 { color: var(--gold); font-size: 1.4rem; letter-spacing: 0.1em; margin-bottom: 0.3rem; }
+  .subtitle { color: #666; font-size: 0.8rem; margin-bottom: 1.5rem; }
+  .toolbar { display: flex; gap: 0.8rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  select, input[type=search] { background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+    border-radius: 3px; padding: 0.4rem 0.6rem; font-family: inherit; font-size: 0.85rem; }
+  input[type=search] { flex: 1; min-width: 200px; }
+  .btn { padding: 0.4rem 0.8rem; background: var(--btn); color: var(--fg); border: 1px solid var(--accent);
+    border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 0.85rem; text-decoration: none; display: inline-block; }
+  .btn:hover { background: var(--btn-hover); }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #3a3028; margin-bottom: 1rem; }
+  .tab { padding: 0.4rem 1rem; cursor: pointer; font-size: 0.85rem; color: #888; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+  .tab:hover:not(.active) { color: var(--fg); }
+  #content { max-height: calc(100vh - 220px); overflow-y: auto; }
+  .entity-list { list-style: none; }
+  .entity-list li { padding: 0.45rem 0.5rem; border-bottom: 1px solid #2a2420; font-size: 0.85rem; cursor: pointer; }
+  .entity-list li:hover { background: #242018; }
+  .entity-list li .name { color: var(--gold); }
+  .entity-list li .meta { color: #888; font-size: 0.75rem; margin-top: 0.15rem; }
+  .detail { background: #242018; border: 1px solid #3a3028; border-radius: 3px; padding: 1rem; font-size: 0.85rem; }
+  .detail h3 { color: var(--gold); margin-bottom: 0.6rem; }
+  .detail table { border-collapse: collapse; width: 100%; }
+  .detail td { padding: 0.25rem 0.5rem; vertical-align: top; }
+  .detail td:first-child { color: var(--accent); width: 35%; white-space: nowrap; }
+  #status { color: #888; font-size: 0.85rem; padding: 1rem 0; }
+  .empty { color: #666; font-style: italic; padding: 1rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--gold); }
+</style>
+</head>
+<body>
+<h1>[ Legends Viewer ]</h1>
+<p class="subtitle">Export legends from inside DF: <em>Legends mode → Export XML</em></p>
+
+<div class="toolbar">
+  <select id="file-sel" onchange="loadFile()"><option value="">— select export —</option></select>
+  <input type="search" id="search" placeholder="Search…" oninput="filterItems()" disabled>
+  <a id="dl-link" class="btn" style="display:none" href="#">&#x2B07; Download XML</a>
+  <a class="btn" href="/play">&#8592; Back to game</a>
+</div>
+
+<div class="tabs" id="tabs" style="display:none">
+  <span class="tab active" data-tab="figures" onclick="switchTab('figures')">Historical figures</span>
+  <span class="tab" data-tab="sites" onclick="switchTab('sites')">Sites</span>
+  <span class="tab" data-tab="civs" onclick="switchTab('civs')">Civilizations</span>
+  <span class="tab" data-tab="events" onclick="switchTab('events')">Events</span>
+</div>
+
+<div id="status">Loading export list…</div>
+<div id="content"></div>
+
+<script>
+let xmlDoc = null;
+let currentTab = 'figures';
+let allItems = [];
+let fileSizes = {}; // name → size_kb
+
+async function init() {
+  const res = await fetch('/play/legends');
+  const files = await res.json();
+  const sel = document.getElementById('file-sel');
+  if (!files || files.length === 0) {
+    document.getElementById('status').textContent = 'No legends exports found. In DF, go to Legends mode and use Export XML (x).';
+    return;
+  }
+  for (const f of files) {
+    const opt = document.createElement('option');
+    opt.value = f.name;
+    const kb = f.size_kb > 0 ? ` (${f.size_kb} KB)` : '';
+    opt.textContent = f.name + kb;
+    sel.appendChild(opt);
+    fileSizes[f.name] = f.size_kb;
+  }
+  document.getElementById('status').textContent = `${files.length} export(s) available — select one above.`;
+  if (files.length === 1) {
+    sel.value = files[0].name;
+    loadFile();
+  }
+}
+
+async function loadFile() {
+  const name = document.getElementById('file-sel').value;
+  if (!name) return;
+  const kb = fileSizes[name] || 0;
+  if (kb > 50000 && !confirm(`This export is ${Math.round(kb/1024)} MB. Loading it may slow or freeze your browser. Continue?`)) return;
+  document.getElementById('status').textContent = 'Loading…';
+  document.getElementById('content').innerHTML = '';
+  document.getElementById('tabs').style.display = 'none';
+  document.getElementById('search').disabled = true;
+
+  const link = document.getElementById('dl-link');
+  link.href = `/play/legends/xml?file=${encodeURIComponent(name)}&download=1`;
+  link.style.display = '';
+
+  try {
+    const res = await fetch(`/play/legends/xml?file=${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const text = await res.text();
+    xmlDoc = new DOMParser().parseFromString(text, 'application/xml');
+    document.getElementById('tabs').style.display = 'flex';
+    document.getElementById('search').disabled = false;
+    switchTab(currentTab);
+  } catch (e) {
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+  }
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('search').value = '';
+  renderTab(tab);
+}
+
+function renderTab(tab) {
+  if (!xmlDoc) return;
+  const content = document.getElementById('content');
+  const q = document.getElementById('search').value.toLowerCase();
+
+  let items;
+  if (tab === 'figures') {
+    items = [...xmlDoc.querySelectorAll('historical_figure')].map(el => ({
+      id: text(el, 'id'),
+      name: text(el, 'name') || '(unnamed)',
+      race: text(el, 'race'),
+      caste: text(el, 'caste'),
+      el,
+    }));
+  } else if (tab === 'sites') {
+    items = [...xmlDoc.querySelectorAll('site')].map(el => ({
+      id: text(el, 'id'),
+      name: text(el, 'name') || '(unnamed)',
+      race: text(el, 'type'),
+      caste: text(el, 'coords'),
+      el,
+    }));
+  } else if (tab === 'civs') {
+    items = [...xmlDoc.querySelectorAll('entity')].map(el => ({
+      id: text(el, 'id'),
+      name: text(el, 'name') || '(unnamed)',
+      race: text(el, 'type'),
+      caste: '',
+      el,
+    }));
+  } else if (tab === 'events') {
+    renderEvents(q);
+    return;
+  }
+
+  if (q) items = items.filter(it => (it.name + it.race + it.caste).toLowerCase().includes(q));
+  allItems = items;
+
+  document.getElementById('status').textContent = `${items.length} entries`;
+  const ul = document.createElement('ul');
+  ul.className = 'entity-list';
+  for (const item of items.slice(0, 500)) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="name">${esc(item.name)}</div><div class="meta">${esc(item.race)}${item.caste ? ' · ' + esc(item.caste) : ''} &nbsp;#${esc(item.id)}</div>`;
+    li.onclick = () => showDetail(item);
+    ul.appendChild(li);
+  }
+  if (items.length > 500) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = `… and ${items.length - 500} more. Refine your search.`;
+    ul.appendChild(li);
+  }
+  content.replaceChildren(ul);
+}
+
+function renderEvents(q) {
+  const events = [...xmlDoc.querySelectorAll('historical_event')];
+  const filtered = q ? events.filter(e => e.textContent.toLowerCase().includes(q)) : events;
+  document.getElementById('status').textContent = `${filtered.length} events`;
+  const ul = document.createElement('ul');
+  ul.className = 'entity-list';
+  for (const ev of filtered.slice(0, 300)) {
+    const li = document.createElement('li');
+    const year = text(ev, 'year') || '?';
+    const type = ev.tagName !== 'historical_event' ? ev.tagName : (text(ev, 'type') || ev.querySelector('*:not(id):not(year):not(seconds72)')?.tagName || 'event');
+    li.innerHTML = `<div class="name">Year ${esc(year)} — ${esc(type)}</div>`;
+    ul.appendChild(li);
+  }
+  document.getElementById('content').replaceChildren(ul);
+}
+
+function showDetail(item) {
+  const div = document.createElement('div');
+  div.className = 'detail';
+  const h3 = document.createElement('h3');
+  h3.textContent = item.name;
+  div.appendChild(h3);
+  const table = document.createElement('table');
+  for (const child of item.el.children) {
+    if (!child.textContent.trim()) continue;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(child.tagName)}</td><td>${esc(child.textContent)}</td>`;
+    table.appendChild(tr);
+  }
+  div.appendChild(table);
+  const back = document.createElement('p');
+  back.style.marginTop = '0.8rem';
+  back.innerHTML = `<a href="#" onclick="renderTab(currentTab);return false;">&#8592; Back to list</a>`;
+  div.appendChild(back);
+  document.getElementById('content').replaceChildren(div);
+}
+
+function filterItems() { renderTab(currentTab); }
+function text(el, tag) { return el.querySelector(tag)?.textContent || ''; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+init();
+</script>
+</body>
+</html>

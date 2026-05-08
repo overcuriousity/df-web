@@ -17,6 +17,8 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
 - **Admin-managed tilesets** — baked into the container image; no remote filesystem access for players.
+- **Storyteller sidebar** — per-fortress markdown journal, live announcement feed (gamelog.txt), legends XML viewer. Always available, no third-party tools required.
+- **DFHack integration** (optional) — in-game `manipulator` labor screen + in-browser labor panel. Opt-in at build time; vanilla DF works without it.
 
 ## Prerequisites
 
@@ -72,10 +74,26 @@ sudo ./scripts/provision-user.sh alice "Alice"
 
 ### 5. Build images
 
+**Vanilla (no DFHack):**
 ```bash
 docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
 ```
+
+**With DFHack** (optional — enables in-game `manipulator` + web labor panel):
+```bash
+docker build -t df-image-base ./df-image-base
+docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.12-r1 ./df-image-sdl
+```
+
+Then set `dfhack_enabled: true` in `session-manager/config.yml`.
+
+> DFHack is not part of this repository and is not required. When `DFHACK_VERSION` is
+> set, the Dockerfile downloads the matching release tarball from
+> [github.com/DFHack/dfhack](https://github.com/DFHack/dfhack) at build time.
+> DFHack is copyright its respective contributors under the zlib license.
+> See [DFHack's license](https://github.com/DFHack/dfhack/blob/develop/LICENSE)
+> for terms of use.
 
 ### 6. Run
 
@@ -118,6 +136,7 @@ Use `--no-cache` whenever Dockerfiles change (including base image layers). Runn
 | `oidc_client_id` | — | OIDC client ID from Nextcloud |
 | `oidc_client_secret` | — | OIDC client secret |
 | `oidc_redirect_uri` | — | Callback URL, e.g. `https://df.example.com/auth/oidc/callback` |
+| `dfhack_enabled` | `false` | Set `true` only when `df-image-sdl` was built with `--build-arg DFHACK_VERSION=…`. Enables the web labor panel and manipulator hint. |
 
 ## User Management
 
@@ -190,6 +209,7 @@ Browser → (your TLS reverse proxy) → 127.0.0.1:8080
                                      Xvfb + x11vnc
                                      websockify + noVNC
                                      DF (SDL2)
+                                     DFHack (optional)
 ```
 
 Each game container:
@@ -218,6 +238,11 @@ It will spawn real Docker containers when users connect, so Docker must be runni
 
 ## License
 
-The code in this repository (session manager, Dockerfiles, web frontend) is MIT licensed. See [LICENSE](LICENSE).
+The code in this repository (session manager, Dockerfiles, web frontend, DFHack Lua scripts in `df-image-sdl/hack/scripts/`) is MIT licensed. See [LICENSE](LICENSE).
 
-Dwarf Fortress itself is **not included**. It is subject to [Bay 12 Games' license](https://www.bay12games.com/dwarves/). This infrastructure is intended for personal, non-commercial use.
+**Not included in this repository:**
+
+- **Dwarf Fortress** — subject to [Bay 12 Games' license](https://www.bay12games.com/dwarves/). Must be downloaded separately (see Quick Start).
+- **DFHack** — an optional third-party tool. When `DFHACK_VERSION` is passed at build time the Dockerfile downloads it from GitHub. DFHack is copyright its contributors; see its [license](https://github.com/DFHack/dfhack/blob/develop/LICENSE).
+
+This infrastructure is intended for personal, non-commercial use.
