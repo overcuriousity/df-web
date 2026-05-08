@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsdl2-image-2.0-0 \
     libopengl0 \
     wget \
+    bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Optional: install DFHack. Set DFHACK_VERSION at build time to enable.
