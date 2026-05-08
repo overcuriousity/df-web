@@ -279,10 +279,16 @@ func validateEntryName(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("empty entry name")
 	}
-	// Normalise to forward slashes (zip) and strip leading "./" / "/".
+	// Normalise to forward slashes (zip) and strip a single leading "./".
+	// We reject leading "/" outright rather than stripping it — silently
+	// turning "/region1/world.dat" into a relative path would be a surprising
+	// rewrite and Copilot flagged it as inconsistent with this function's
+	// "rejects absolute paths" claim.
 	name = strings.ReplaceAll(name, `\`, `/`)
 	name = strings.TrimPrefix(name, "./")
-	name = strings.TrimPrefix(name, "/")
+	if strings.HasPrefix(name, "/") {
+		return "", fmt.Errorf("absolute path in entry %q", name)
+	}
 	clean := path.Clean(name)
 	if strings.HasPrefix(clean, "/") {
 		return "", fmt.Errorf("absolute path in entry %q", name)

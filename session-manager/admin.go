@@ -111,11 +111,18 @@ func (m *Manager) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	rawToken, err := m.store.CreateUser(body.UID, body.DisplayName)
 	if err != nil {
 		log.Printf("admin: CreateUser %s: %v", body.UID, err)
-		status := http.StatusBadRequest
-		if errors.Is(err, ErrUserExists) {
-			status = http.StatusConflict
+		// User-facing errors stay informative; internal failures (token
+		// generation, disk write) get a generic 500 so we don't leak details
+		// like file paths or syscall errors back to the browser.
+		switch {
+		case errors.Is(err, ErrUserExists):
+			http.Error(w, "user already exists", http.StatusConflict)
+		default:
+			// CreateUser only returns ErrUserExists or internal errors —
+			// validation (uid charset) is checked before this call, so any
+			// other error here is server-side.
+			http.Error(w, "internal error creating user", http.StatusInternalServerError)
 		}
-		http.Error(w, err.Error(), status)
 		return
 	}
 
@@ -230,21 +237,28 @@ func (m *Manager) adminDeleteUser(w http.ResponseWriter, r *http.Request, uid st
 		m.mu.Unlock()
 	}
 
-	// Step 2: remove on-disk save directory before users.yml so a crash leaves
-	// at most an orphaned YAML entry (recoverable) rather than orphaned files
-	// (un-mappable to any user).
-	userRoot := filepath.Join(m.cfg.SavesRoot, uid)
-	if err := os.RemoveAll(userRoot); err != nil {
-		log.Printf("admin: RemoveAll %s: %v", userRoot, err)
-		http.Error(w, "could not remove user data", http.StatusInternalServerError)
-		return
-	}
-
-	// Step 3: drop from users.yml.
+	// Step 2: drop from users.yml *before* removing data on disk. This order
+	// matters for two reasons:
+	//   1. Once the user is gone from the store, requireAuth rejects further
+	//      requests for this uid and ensureContainer can't spawn a fresh
+	//      container under us — closing the race where /play recreates the
+	//      data dir we're about to delete.
+	//   2. If DeleteUser fails (EBUSY, disk full, …) the user still has their
+	//      data dir intact and the operator can retry. The reverse order would
+	//      have already nuked their saves before we knew the YAML write had
+	//      failed — irreversible data loss while reporting an error.
 	if err := m.store.DeleteUser(uid); err != nil {
 		log.Printf("admin: DeleteUser %s: %v", uid, err)
 		http.Error(w, "could not remove user record", http.StatusInternalServerError)
 		return
+	}
+
+	// Step 3: remove on-disk save directory. If this fails the user is already
+	// gone from the system; log and surface a soft warning rather than a hard
+	// error so the operator can clean up the orphan dir manually.
+	userRoot := filepath.Join(m.cfg.SavesRoot, uid)
+	if err := os.RemoveAll(userRoot); err != nil {
+		log.Printf("admin: RemoveAll %s after user record removed: %v", userRoot, err)
 	}
 
 	log.Printf("admin: deleted user %s (by %s)", uid, caller)

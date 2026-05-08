@@ -65,6 +65,12 @@ func loadUsers(path string) (*UserStore, error) {
 }
 
 func (s *UserStore) reload() error {
+	// Hold the write lock across the file read so a concurrent saveLocked()
+	// can't be mid-O_TRUNC-overwrite (used as the EBUSY fallback when
+	// users.yml is bind-mounted as a single file). Without this, ReadFile
+	// could see a partially-written file and Unmarshal would fail.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		return err
@@ -73,8 +79,6 @@ func (s *UserStore) reload() error {
 	if err := yaml.Unmarshal(data, &list); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.users = make(map[string]*User, len(list))
 	for _, u := range list {
 		s.users[u.UID] = u
