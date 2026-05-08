@@ -4,9 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 )
 
 func main() {
@@ -15,7 +13,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	store, err := loadUsers("users.yml")
+	store, err := openDB("users.db")
 	if err != nil {
 		log.Fatalf("users: %v", err)
 	}
@@ -29,29 +27,15 @@ func main() {
 	// Ensure every known user has correctly-owned data + config directories.
 	// Idempotent; corrects root:root auto-creates from Docker's bind-mount
 	// path-creation behaviour.
-	store.mu.RLock()
-	for uid := range store.users {
-		if err := ensureUserDirs(cfg.SavesRoot, uid); err != nil {
-			log.Printf("warn: could not ensure user dirs for %s: %v", uid, err)
+	for _, u := range store.All() {
+		if err := ensureUserDirs(cfg.SavesRoot, u.UID); err != nil {
+			log.Printf("warn: could not ensure user dirs for %s: %v", u.UID, err)
 		}
 	}
-	store.mu.RUnlock()
 
 	mgr := newManager(cfg, store)
 	mgr.reconcile()
 	go mgr.idleReaper()
-
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGHUP)
-		for range ch {
-			if err := store.reload(); err != nil {
-				log.Printf("reload users: %v", err)
-			} else {
-				log.Printf("users.yml reloaded")
-			}
-		}
-	}()
 
 	webDir := cfg.WebDir
 	if webDir == "" {

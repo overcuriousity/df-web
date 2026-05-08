@@ -4,29 +4,24 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
-	"syscall"
+	"strings"
 
+	_ "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
 // ErrUserExists is returned by CreateUser when the uid is already taken.
-// Handlers use errors.Is to map this to 409 reliably without string-matching.
 var ErrUserExists = fmt.Errorf("user already exists")
 
-// uidRe is the same charset enforced by scripts/provision-user.sh: 1-32 chars,
-// lowercase alphanumeric plus _ and -, must start alphanumeric. UIDs flow into
-// container names, filesystem paths, and YAML keys, so a shared regex keeps the
-// script and the daemon from disagreeing about what's safe.
+// uidRe is the same charset enforced by scripts/provision-user.sh.
 var uidRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 type PasskeyCredential struct {
@@ -37,41 +32,83 @@ type PasskeyCredential struct {
 }
 
 type User struct {
-	UID         string              `yaml:"uid"`
-	DisplayName string              `yaml:"display_name"`
-	TokenHash   string              `yaml:"token_hash"` // hex SHA-256 of the raw token
-	OIDCSub     string              `yaml:"oidc_sub"`
-	Passkeys    []PasskeyCredential `yaml:"passkeys"`
-	DefaultMode string              `yaml:"default_mode"` // "sdl" or "text"
-	// ActiveTileset is the filename (e.g. "curses_640x300.png") of the user's
-	// chosen tileset under <savesRoot>/<uid>/tilesets/. Applied to init.txt
-	// at container spawn. Empty means "use the image default".
-	ActiveTileset string `yaml:"active_tileset,omitempty"`
-	// IsAdmin grants access to /admin/* routes. Set only by provision-user.sh
-	// (--admin / --promote / --demote) — the web UI never toggles this flag,
-	// so a compromised admin session cannot self-perpetuate the role.
-	IsAdmin bool `yaml:"is_admin,omitempty"`
+	UID           string             `yaml:"uid"`
+	DisplayName   string             `yaml:"display_name"`
+	TokenHash     string             `yaml:"token_hash"`
+	OIDCSub       string             `yaml:"oidc_sub"`
+	Passkeys      []PasskeyCredential `yaml:"passkeys"`
+	DefaultMode   string             `yaml:"default_mode"`
+	ActiveTileset string             `yaml:"active_tileset,omitempty"`
+	IsAdmin       bool               `yaml:"is_admin,omitempty"`
 }
 
 type UserStore struct {
-	mu    sync.RWMutex
-	path  string
-	users map[string]*User
+	db *sql.DB
 }
 
-func loadUsers(path string) (*UserStore, error) {
-	s := &UserStore{path: path, users: make(map[string]*User)}
-	return s, s.reload()
+const schema = `
+CREATE TABLE IF NOT EXISTS users (
+	uid            TEXT PRIMARY KEY,
+	display_name   TEXT NOT NULL DEFAULT '',
+	token_hash     TEXT NOT NULL DEFAULT '',
+	oidc_sub       TEXT NOT NULL DEFAULT '',
+	is_admin       INTEGER NOT NULL DEFAULT 0,
+	active_tileset TEXT NOT NULL DEFAULT '',
+	default_mode   TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS passkeys (
+	uid        TEXT NOT NULL REFERENCES users(uid) ON DELETE CASCADE,
+	cred_id    TEXT NOT NULL,
+	public_key TEXT NOT NULL,
+	aaguid     TEXT NOT NULL DEFAULT '',
+	sign_count INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (uid, cred_id)
+);
+`
+
+func openDB(path string) (*UserStore, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	// Single writer connection avoids SQLITE_BUSY on concurrent mutations.
+	db.SetMaxOpenConns(1)
+
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("sqlite pragma: %w", err)
+		}
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqlite schema: %w", err)
+	}
+
+	s := &UserStore{db: db}
+
+	// One-time import: if users.yml sits next to the DB and the users table is
+	// empty, migrate data automatically so the first deploy is seamless.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err == nil && count == 0 {
+		yamlPath := filepath.Join(filepath.Dir(path), "users.yml")
+		if _, statErr := os.Stat(yamlPath); statErr == nil {
+			if err := importFromYAML(db, yamlPath); err != nil {
+				log.Printf("users: YAML import failed: %v", err)
+			}
+		}
+	}
+	return s, nil
 }
 
-func (s *UserStore) reload() error {
-	// Hold the write lock across the file read so a concurrent saveLocked()
-	// can't be mid-O_TRUNC-overwrite (used as the EBUSY fallback when
-	// users.yml is bind-mounted as a single file). Without this, ReadFile
-	// could see a partially-written file and Unmarshal would fail.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	data, err := os.ReadFile(s.path)
+// importFromYAML reads a legacy users.yml and inserts all users + passkeys in
+// a single transaction. Called once on first startup after the DB migration.
+func importFromYAML(db *sql.DB, path string) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -79,186 +116,217 @@ func (s *UserStore) reload() error {
 	if err := yaml.Unmarshal(data, &list); err != nil {
 		return err
 	}
-	s.users = make(map[string]*User, len(list))
-	for _, u := range list {
-		s.users[u.UID] = u
+	tx, err := db.Begin()
+	if err != nil {
+		return err
 	}
-	log.Printf("users: loaded %d user(s) from %s", len(list), s.path)
+	for _, u := range list {
+		isAdmin := 0
+		if u.IsAdmin {
+			isAdmin = 1
+		}
+		_, err := tx.Exec(
+			`INSERT INTO users(uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			u.UID, u.DisplayName, u.TokenHash, u.OIDCSub, isAdmin, u.ActiveTileset, u.DefaultMode,
+		)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("import user %q: %w", u.UID, err)
+		}
+		for _, c := range u.Passkeys {
+			_, err := tx.Exec(
+				`INSERT INTO passkeys(uid, cred_id, public_key, aaguid, sign_count) VALUES (?, ?, ?, ?, ?)`,
+				u.UID, c.ID, c.PublicKey, c.AAGUID, c.SignCount,
+			)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("import passkey for %q: %w", u.UID, err)
+			}
+		}
+		log.Printf("users: imported %s from users.yml", u.UID)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("users: imported %d user(s) from %s", len(list), path)
 	return nil
 }
 
-// save serialises the in-memory user map to disk atomically. Callers must
-// already hold s.mu (write lock); see saveLocked / the *Locked write helpers.
-// The caller-holds-lock contract means concurrent writers can't lose updates
-// (a previous version released the lock before marshalling, letting two
-// in-flight UpdatePasskeys clobber each other).
-//
-// The temp-file + rename + dir-fsync sequence ensures users.yml is never seen
-// truncated, even on crash or power loss between truncate and write — which
-// would otherwise lock every user out of the service.
-func (s *UserStore) saveLocked() error {
-	list := make([]*User, 0, len(s.users))
-	for _, u := range s.users {
-		list = append(list, u)
-	}
-	data, err := yaml.Marshal(list)
+func fetchPasskeys(db *sql.DB, uid string) ([]PasskeyCredential, error) {
+	rows, err := db.Query(`SELECT cred_id, public_key, aaguid, sign_count FROM passkeys WHERE uid=?`, uid)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	dir := filepath.Dir(s.path)
-	tmp, err := os.CreateTemp(dir, ".users-*.yml.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		// Bind-mounted single files (our docker-compose mounts users.yml that
-		// way) reject rename-over with EBUSY because the kernel pins the inode
-		// at the mount point. Fall back to copying the tmp file's contents over
-		// the existing inode via O_TRUNC. We've already fsync'd the tmp, so a
-		// crash mid-copy leaves the tmp file intact for manual recovery; the
-		// only guarantee we lose vs. rename is the inode-swap atomicity, which
-		// is irrelevant here since nothing reads users.yml mid-write.
-		if errors.Is(err, syscall.EBUSY) {
-			if copyErr := overwriteInPlace(tmpPath, s.path); copyErr != nil {
-				cleanup()
-				return copyErr
-			}
-			cleanup()
-			return nil
+	defer rows.Close()
+	var creds []PasskeyCredential
+	for rows.Next() {
+		var c PasskeyCredential
+		if err := rows.Scan(&c.ID, &c.PublicKey, &c.AAGUID, &c.SignCount); err != nil {
+			return nil, err
 		}
-		cleanup()
-		return err
+		creds = append(creds, c)
 	}
-	// fsync the parent directory so the rename is durable.
-	d, err := os.Open(dir)
+	return creds, rows.Err()
+}
+
+func fetchUserRow(db *sql.DB, uid string) (*User, bool, error) {
+	u := &User{}
+	var isAdmin int
+	err := db.QueryRow(
+		`SELECT uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode FROM users WHERE uid=?`, uid,
+	).Scan(&u.UID, &u.DisplayName, &u.TokenHash, &u.OIDCSub, &isAdmin, &u.ActiveTileset, &u.DefaultMode)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
 	if err != nil {
-		log.Printf("users.save: open parent dir %s for fsync: %v", dir, err)
-		return nil
+		return nil, false, err
 	}
-	if err := d.Sync(); err != nil {
-		log.Printf("users.save: fsync parent dir %s: %v", dir, err)
+	u.IsAdmin = isAdmin != 0
+	var pkErr error
+	u.Passkeys, pkErr = fetchPasskeys(db, uid)
+	if pkErr != nil {
+		return nil, false, pkErr
 	}
-	if err := d.Close(); err != nil {
-		log.Printf("users.save: close parent dir %s: %v", dir, err)
-	}
-	return nil
+	return u, true, nil
 }
 
 func (s *UserStore) ByToken(raw string) (*User, bool) {
 	want := sha256hex(raw)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, u := range s.users {
-		if u.TokenHash != "" && subtle.ConstantTimeCompare([]byte(u.TokenHash), []byte(want)) == 1 {
-			return u, true
-		}
+	var uid string
+	err := s.db.QueryRow(`SELECT uid FROM users WHERE token_hash=?`, want).Scan(&uid)
+	if err != nil {
+		return nil, false
 	}
-	return nil, false
+	// Re-verify with constant-time compare to mitigate any DB timing leakage.
+	var storedHash string
+	s.db.QueryRow(`SELECT token_hash FROM users WHERE uid=?`, uid).Scan(&storedHash)
+	if subtle.ConstantTimeCompare([]byte(storedHash), []byte(want)) != 1 {
+		return nil, false
+	}
+	u, ok, err := fetchUserRow(s.db, uid)
+	if err != nil {
+		log.Printf("users.ByToken: %v", err)
+		return nil, false
+	}
+	return u, ok
 }
 
 func (s *UserStore) ByOIDCSub(sub string) (*User, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, u := range s.users {
-		if u.OIDCSub == sub {
-			return u, true
-		}
+	var uid string
+	err := s.db.QueryRow(`SELECT uid FROM users WHERE oidc_sub=?`, sub).Scan(&uid)
+	if err != nil {
+		return nil, false
 	}
-	return nil, false
+	u, ok, err := fetchUserRow(s.db, uid)
+	if err != nil {
+		log.Printf("users.ByOIDCSub: %v", err)
+		return nil, false
+	}
+	return u, ok
 }
 
 func (s *UserStore) ByUID(uid string) (*User, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.users[uid]
+	u, ok, err := fetchUserRow(s.db, uid)
+	if err != nil {
+		log.Printf("users.ByUID: %v", err)
+		return nil, false
+	}
 	return u, ok
 }
 
 func (s *UserStore) UpdatePasskeys(uid string, creds []PasskeyCredential) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u, ok := s.users[uid]
-	if !ok {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE uid=?`, uid).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
 		return fmt.Errorf("user %q not found", uid)
 	}
-	u.Passkeys = creds
-	return s.saveLocked()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM passkeys WHERE uid=?`, uid); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, c := range creds {
+		if _, err := tx.Exec(
+			`INSERT INTO passkeys(uid, cred_id, public_key, aaguid, sign_count) VALUES (?, ?, ?, ?, ?)`,
+			uid, c.ID, c.PublicKey, c.AAGUID, c.SignCount,
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *UserStore) SetActiveTileset(uid, name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u, ok := s.users[uid]
-	if !ok {
+	res, err := s.db.Exec(`UPDATE users SET active_tileset=? WHERE uid=?`, name, uid)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
 		return fmt.Errorf("user %q not found", uid)
-	}
-	u.ActiveTileset = name
-	return s.saveLocked()
-}
-
-// UpdatePasskeySignCount atomically writes a new SignCount for the credential
-// matching credID under uid. Used after a successful WebAuthn assertion to
-// keep the clone-detection counter monotonic. Returns nil if the user or
-// credential is not found (the assertion already validated the credential
-// itself; a missing entry here means a concurrent delete won the race).
-func (s *UserStore) UpdatePasskeySignCount(uid string, credID []byte, signCount uint32) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u, ok := s.users[uid]
-	if !ok {
-		return nil
-	}
-	for i, c := range u.Passkeys {
-		id, _ := decodeBase64URL(c.ID)
-		if subtle.ConstantTimeCompare(id, credID) == 1 {
-			if u.Passkeys[i].SignCount == signCount {
-				return nil // no change, skip the disk write
-			}
-			u.Passkeys[i].SignCount = signCount
-			return s.saveLocked()
-		}
 	}
 	return nil
 }
 
-func (s *UserStore) AllPasskeyUsers() []*User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []*User
-	for _, u := range s.users {
-		if len(u.Passkeys) > 0 {
-			out = append(out, u)
+// UpdatePasskeySignCount updates the clone-detection counter for a credential.
+// Returns nil if the user or credential is not found (concurrent delete wins).
+func (s *UserStore) UpdatePasskeySignCount(uid string, credID []byte, signCount uint32) error {
+	rows, err := s.db.Query(`SELECT cred_id, sign_count FROM passkeys WHERE uid=?`, uid)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credIDStr string
+		var currentCount uint32
+		if err := rows.Scan(&credIDStr, &currentCount); err != nil {
+			return err
 		}
+		id, _ := decodeBase64URL(credIDStr)
+		if subtle.ConstantTimeCompare(id, credID) == 1 {
+			if currentCount == signCount {
+				return nil
+			}
+			_, err := s.db.Exec(`UPDATE passkeys SET sign_count=? WHERE uid=? AND cred_id=?`, signCount, uid, credIDStr)
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *UserStore) AllPasskeyUsers() []*User {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT u.uid FROM users u JOIN passkeys p ON p.uid=u.uid`,
+	)
+	if err != nil {
+		log.Printf("users.AllPasskeyUsers: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			continue
+		}
+		u, ok, err := fetchUserRow(s.db, uid)
+		if err != nil || !ok {
+			continue
+		}
+		out = append(out, u)
 	}
 	return out
 }
 
-// CreateUser appends a new user and returns the freshly-generated raw access
+// CreateUser inserts a new user and returns the freshly-generated raw access
 // token. The token is returned exactly once; only its SHA-256 is persisted.
-// The caller is responsible for creating the on-disk save directories.
 func (s *UserStore) CreateUser(uid, displayName string) (string, error) {
 	if !uidRe.MatchString(uid) {
 		return "", fmt.Errorf("uid %q invalid: must be 1-32 chars, lowercase alphanumeric / underscore / dash, starting alphanumeric", uid)
@@ -270,20 +338,15 @@ func (s *UserStore) CreateUser(uid, displayName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.users[uid]; exists {
-		return "", fmt.Errorf("%w: %q", ErrUserExists, uid)
-	}
-	s.users[uid] = &User{
-		UID:         uid,
-		DisplayName: displayName,
-		TokenHash:   sha256hex(raw),
-	}
-	if err := s.saveLocked(); err != nil {
-		// Roll back the in-memory mutation so a failed disk write doesn't
-		// silently leave a user that vanishes on the next reload.
-		delete(s.users, uid)
+	_, err = s.db.Exec(
+		`INSERT INTO users(uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode) VALUES (?, ?, ?, '', 0, '', '')`,
+		uid, displayName, sha256hex(raw),
+	)
+	if err != nil {
+		// SQLite UNIQUE constraint violation means the uid is taken.
+		if isConstraintErr(err) {
+			return "", fmt.Errorf("%w: %q", ErrUserExists, uid)
+		}
 		return "", err
 	}
 	return raw, nil
@@ -296,74 +359,70 @@ func (s *UserStore) RotateToken(uid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u, ok := s.users[uid]
-	if !ok {
-		return "", fmt.Errorf("user %q not found", uid)
-	}
-	prev := u.TokenHash
-	u.TokenHash = sha256hex(raw)
-	if err := s.saveLocked(); err != nil {
-		u.TokenHash = prev
+	res, err := s.db.Exec(`UPDATE users SET token_hash=? WHERE uid=?`, sha256hex(raw), uid)
+	if err != nil {
 		return "", err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return "", fmt.Errorf("user %q not found", uid)
 	}
 	return raw, nil
 }
 
-// DeleteUser removes the in-memory entry and persists. Filesystem and
+// DeleteUser removes the user record (passkeys cascade). Filesystem and
 // container cleanup is the caller's responsibility.
 func (s *UserStore) DeleteUser(uid string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	u, ok := s.users[uid]
-	if !ok {
-		return fmt.Errorf("user %q not found", uid)
-	}
-	delete(s.users, uid)
-	if err := s.saveLocked(); err != nil {
-		s.users[uid] = u
+	res, err := s.db.Exec(`DELETE FROM users WHERE uid=?`, uid)
+	if err != nil {
 		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %q not found", uid)
 	}
 	return nil
 }
 
 // IsAdmin reports whether the user exists and has the admin flag set.
 func (s *UserStore) IsAdmin(uid string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.users[uid]
-	return ok && u.IsAdmin
+	var isAdmin int
+	err := s.db.QueryRow(`SELECT is_admin FROM users WHERE uid=?`, uid).Scan(&isAdmin)
+	return err == nil && isAdmin != 0
 }
 
-// All returns a snapshot copy of all users, sorted-by-uid order is not
-// guaranteed (caller can sort). Useful for the admin listing.
+// All returns a snapshot of all users with their passkeys.
 func (s *UserStore) All() []*User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*User, 0, len(s.users))
-	for _, u := range s.users {
-		// Deep copy: the shallow `cp := *u` aliases u.Passkeys' backing array,
-		// so a future caller iterating result entries could mutate live store
-		// state without holding the lock.
-		cp := *u
-		if u.Passkeys != nil {
-			cp.Passkeys = append([]PasskeyCredential(nil), u.Passkeys...)
+	rows, err := s.db.Query(
+		`SELECT uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode FROM users ORDER BY uid`,
+	)
+	if err != nil {
+		log.Printf("users.All: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		u := &User{}
+		var isAdmin int
+		if err := rows.Scan(&u.UID, &u.DisplayName, &u.TokenHash, &u.OIDCSub, &isAdmin, &u.ActiveTileset, &u.DefaultMode); err != nil {
+			continue
 		}
-		out = append(out, &cp)
+		u.IsAdmin = isAdmin != 0
+		u.Passkeys, _ = fetchPasskeys(s.db, u.UID)
+		out = append(out, u)
 	}
 	return out
 }
 
 // newRawToken produces a 40-char base64 token, matching the entropy and
-// alphabet of provision-user.sh so any tooling expecting that shape works.
+// alphabet of provision-user.sh.
 func newRawToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	enc := base64.StdEncoding.EncodeToString(b)
-	// Strip pad/+/ to mirror the script's `tr -d '=+/'` then trim to 40 chars.
 	cleaned := make([]byte, 0, len(enc))
 	for i := 0; i < len(enc); i++ {
 		c := enc[i]
@@ -373,37 +432,21 @@ func newRawToken() (string, error) {
 		cleaned = append(cleaned, c)
 	}
 	if len(cleaned) < 40 {
-		// Extremely unlikely with 32 bytes of randomness, but be defensive.
 		return "", fmt.Errorf("token generation: only %d usable chars", len(cleaned))
 	}
 	return string(cleaned[:40]), nil
 }
 
-// overwriteInPlace copies src's contents over dst using O_TRUNC, preserving
-// dst's inode (required for bind-mounted single files). Caller must have
-// already fsync'd src so the data is durable on disk.
-func overwriteInPlace(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	if err := out.Sync(); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
-}
-
 func sha256hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+// isConstraintErr detects SQLite UNIQUE/PRIMARY KEY constraint violations.
+func isConstraintErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "UNIQUE constraint") || strings.Contains(s, "PRIMARY KEY constraint")
 }

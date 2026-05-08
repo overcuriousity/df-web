@@ -11,7 +11,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro  # needed to spawn game containers
       - /srv/df/users:/srv/df/users                   # per-user data/ + config/ live here
       - ./session-manager/config.yml:/app/config.yml:ro
-      - ./session-manager/users.yml:/app/users.yml
+      - ./session-manager/users.db:/app/users.db
       - ./web:/app/web:ro
     environment:
       LISTEN: "0.0.0.0:8080"
