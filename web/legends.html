@@ -62,6 +62,7 @@
 let xmlDoc = null;
 let currentTab = 'figures';
 let allItems = [];
+let fileSizes = {}; // name → size_kb
 
 async function init() {
   const res = await fetch('/play/legends');
@@ -77,6 +78,7 @@ async function init() {
     const kb = f.size_kb > 0 ? ` (${f.size_kb} KB)` : '';
     opt.textContent = f.name + kb;
     sel.appendChild(opt);
+    fileSizes[f.name] = f.size_kb;
   }
   document.getElementById('status').textContent = `${files.length} export(s) available — select one above.`;
   if (files.length === 1) {
@@ -88,6 +90,8 @@ async function init() {
 async function loadFile() {
   const name = document.getElementById('file-sel').value;
   if (!name) return;
+  const kb = fileSizes[name] || 0;
+  if (kb > 50000 && !confirm(`This export is ${Math.round(kb/1024)} MB. Loading it may slow or freeze your browser. Continue?`)) return;
   document.getElementById('status').textContent = 'Loading…';
   document.getElementById('content').innerHTML = '';
   document.getElementById('tabs').style.display = 'none';

@@ -353,7 +353,6 @@ function toggleSidebar() {
   sidebarOpen = !sidebarOpen;
   document.getElementById('sidebar').classList.toggle('open', sidebarOpen);
   if (sidebarOpen) {
-    fetchCapabilities();
     loadSaves();
   } else {
     stopTimeline();
@@ -629,6 +628,8 @@ async function onLaborToggle(e) {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+fetchCapabilities();
 </script>
 </body>
 </html>

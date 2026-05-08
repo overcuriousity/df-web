@@ -41,6 +41,9 @@ type Manager struct {
 
 	mu         sync.Mutex
 	containers map[string]*containerInfo // uid → container
+
+	sessionLogsMu sync.Mutex
+	sessionLogs   map[string]*sessionLog // uid → active session log
 }
 
 func newManager(cfg *Config, store *UserStore) *Manager {
@@ -49,10 +52,11 @@ func newManager(cfg *Config, store *UserStore) *Manager {
 		log.Fatalf("cookie_key must be a 64+ hex character string (32+ bytes)")
 	}
 	return &Manager{
-		cfg:        cfg,
-		store:      store,
-		cookieKey:  key,
-		containers: make(map[string]*containerInfo),
+		cfg:         cfg,
+		store:       store,
+		cookieKey:   key,
+		containers:  make(map[string]*containerInfo),
+		sessionLogs: make(map[string]*sessionLog),
 	}
 }
 
@@ -252,7 +256,7 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 	log.Printf("started container %s for user %s (mode=%s addr=%s:%d)", id[:12], uid, mode, containerName, vncPort)
 
 	// Start gamelog tailer for the new session (outside the lock; tailer is self-contained).
-	go m.getOrCreateSessionLog(uid)
+	m.getOrCreateSessionLog(uid)
 
 	return ci, nil
 }

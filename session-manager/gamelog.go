@@ -29,7 +29,7 @@ var kindRules = []struct {
 }{
 	{"siege", regexp.MustCompile(`(?i)\b(siege|attack|invade|horde|ambush|snatcher)\b`)},
 	{"death", regexp.MustCompile(`(?i)\b(has (died|been slain|drowned|starved|bled to death)|struck down|killed)\b`)},
-	{"artifact", regexp.MustCompile(`(?i)\b(has created a masterwork|has claimed|legendary artifact|named .* the )\b`)},
+	{"artifact", regexp.MustCompile(`(?i)\b(has created a masterwork|has claimed|legendary artifact|named\s+\S+\s+the\b)\b`)},
 	{"mood", regexp.MustCompile(`(?i)\b(fell into a (fey|secretive|possessed|melancholy|berserk|macabre) mood|is taken by a strange mood)\b`)},
 	{"migration", regexp.MustCompile(`(?i)\b(migrants have arrived|a group of migrants|caravan)\b`)},
 	{"season", regexp.MustCompile(`(?i)\b(spring has arrived|summer has arrived|autumn has arrived|winter has arrived|year \d+)\b`)},
@@ -47,10 +47,10 @@ func classifyLine(line string) string {
 // sessionLog holds the in-memory event ring and subscriber channels for one
 // user's running container.
 type sessionLog struct {
-	mu        sync.Mutex
-	events    []gamelogEvent // ring buffer, capped at maxEvents
-	subs      []chan gamelogEvent
-	done      chan struct{}
+	mu     sync.Mutex
+	events []gamelogEvent // ring buffer, capped at maxEvents
+	subs   []chan gamelogEvent
+	done   chan struct{}
 }
 
 const maxEvents = 500
@@ -153,6 +153,10 @@ func startGamelogTailer(sl *sessionLog, savesRoot, uid string) {
 			n, err := f.Read(tmp)
 			if n > 0 {
 				buf = append(buf, tmp[:n]...)
+				// Drop partial-line buffer if it grows unreasonably large (e.g. corrupt output).
+				if len(buf) > 65536 {
+					buf = buf[:0]
+				}
 				for {
 					idx := bytes.IndexByte(buf, '\n')
 					if idx < 0 {
@@ -183,13 +187,12 @@ func (m *Manager) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 
 	m.mu.Lock()
-	ci, ok := m.containers[uid]
+	_, ok := m.containers[uid]
 	m.mu.Unlock()
 	if !ok {
 		http.Error(w, "no active session", http.StatusNotFound)
 		return
 	}
-	_ = ci
 
 	sl := m.getOrCreateSessionLog(uid)
 	ch := sl.subscribe()
@@ -232,31 +235,25 @@ func (m *Manager) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sessionLogs holds per-uid session log instances.
-var (
-	sessionLogsMu sync.Mutex
-	sessionLogs   = map[string]*sessionLog{}
-)
-
 func (m *Manager) getOrCreateSessionLog(uid string) *sessionLog {
-	sessionLogsMu.Lock()
-	defer sessionLogsMu.Unlock()
-	if sl, ok := sessionLogs[uid]; ok {
+	m.sessionLogsMu.Lock()
+	defer m.sessionLogsMu.Unlock()
+	if sl, ok := m.sessionLogs[uid]; ok {
 		return sl
 	}
 	sl := newSessionLog()
-	sessionLogs[uid] = sl
+	m.sessionLogs[uid] = sl
 	startGamelogTailer(sl, m.cfg.SavesRoot, uid)
 	return sl
 }
 
 func (m *Manager) stopSessionLog(uid string) {
-	sessionLogsMu.Lock()
-	sl, ok := sessionLogs[uid]
+	m.sessionLogsMu.Lock()
+	sl, ok := m.sessionLogs[uid]
 	if ok {
-		delete(sessionLogs, uid)
+		delete(m.sessionLogs, uid)
 	}
-	sessionLogsMu.Unlock()
+	m.sessionLogsMu.Unlock()
 	if ok {
 		sl.stop()
 	}

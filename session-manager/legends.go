@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +20,9 @@ func (m *Manager) handleLegendsIndex(w http.ResponseWriter, r *http.Request) {
 	dataDir := userDataDir(m.cfg.SavesRoot, uid)
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("legends: ReadDir %s: %v", dataDir, err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("[]"))
 		return
@@ -79,7 +84,8 @@ func (m *Manager) handleLegendsXML(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	if r.URL.Query().Get("download") == "1" {
-		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+		disp := mime.FormatMediaType("attachment", map[string]string{"filename": name})
+		w.Header().Set("Content-Disposition", disp)
 	}
 	http.ServeContent(w, r, name, modTime, f)
 }
