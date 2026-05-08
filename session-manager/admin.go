@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -110,9 +111,8 @@ func (m *Manager) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	rawToken, err := m.store.CreateUser(body.UID, body.DisplayName)
 	if err != nil {
 		log.Printf("admin: CreateUser %s: %v", body.UID, err)
-		// "already exists" is a 409, anything else is 400.
 		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, ErrUserExists) {
 			status = http.StatusConflict
 		}
 		http.Error(w, err.Error(), status)
@@ -200,8 +200,14 @@ func (m *Manager) adminDeleteUser(w http.ResponseWriter, r *http.Request, uid st
 		log.Printf("admin: stopping container %s for delete of %s", ci.id[:12], uid)
 		if err := dockerStop(ci.id); err != nil {
 			log.Printf("admin: dockerStop %s: %v", uid, err)
-			// Leave the entry in place (stopping=true blocks re-spawn) and bail.
-			// Operator can retry; the user's data is untouched.
+			// We're aborting the delete, so reset stopping=false: leaving it set
+			// would wedge /play (errSessionEnding) for an account that is
+			// otherwise still valid. Operator can retry the delete later.
+			m.mu.Lock()
+			if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+				cur.stopping = false
+			}
+			m.mu.Unlock()
 			http.Error(w, "could not stop user's container — try again in a moment", http.StatusServiceUnavailable)
 			return
 		}

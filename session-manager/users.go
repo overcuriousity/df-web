@@ -16,6 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ErrUserExists is returned by CreateUser when the uid is already taken.
+// Handlers use errors.Is to map this to 409 reliably without string-matching.
+var ErrUserExists = fmt.Errorf("user already exists")
+
 // uidRe is the same charset enforced by scripts/provision-user.sh: 1-32 chars,
 // lowercase alphanumeric plus _ and -, must start alphanumeric. UIDs flow into
 // container names, filesystem paths, and YAML keys, so a shared regex keeps the
@@ -247,7 +251,7 @@ func (s *UserStore) CreateUser(uid, displayName string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.users[uid]; exists {
-		return "", fmt.Errorf("uid %q already exists", uid)
+		return "", fmt.Errorf("%w: %q", ErrUserExists, uid)
 	}
 	s.users[uid] = &User{
 		UID:         uid,

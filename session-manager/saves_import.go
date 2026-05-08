@@ -43,74 +43,108 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 
 	// Refuse with the container still up. DF holds open file handles on the
 	// active world; quietly merging files underneath it would corrupt the save.
+	// Verify against the actual runtime, not just the map: stale entries left by
+	// a DF crash or manual docker rm would otherwise wedge import indefinitely
+	// until the next /play triggered ensureContainer cleanup.
 	m.mu.Lock()
-	_, hasContainer := m.containers[uid]
+	ci, hasContainer := m.containers[uid]
 	m.mu.Unlock()
 	if hasContainer {
-		http.Error(w, "stop your active session before importing a save", http.StatusConflict)
-		return
+		if dockerIsRunning(ci.id) {
+			http.Error(w, "stop your active session before importing a save", http.StatusConflict)
+			return
+		}
+		// Stale entry: the container exited out from under us. Clear it so the
+		// next /play spawns a fresh one, and let the import proceed.
+		log.Printf("import: clearing stale container entry %s for %s (no longer running)", ci.id[:12], uid)
+		m.mu.Lock()
+		if cur, ok := m.containers[uid]; ok && cur.id == ci.id {
+			delete(m.containers, uid)
+		}
+		m.mu.Unlock()
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportUploadBytes+1<<20)
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		// MaxBytesReader returns an *http.MaxBytesError — surface 413 in that case.
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
-			return
-		}
+
+	// Stream the multipart file part directly to disk. We avoid
+	// ParseMultipartForm because it spools >memMax bytes to os.TempDir() —
+	// which inside this container is /tmp, a 64 MiB tmpfs that's far smaller
+	// than the 200 MiB upload cap. MultipartReader gives us a raw stream of
+	// parts so we can copy straight into staging on the user's volume.
+	mr, err := r.MultipartReader()
+	if err != nil {
 		http.Error(w, "malformed upload", http.StatusBadRequest)
 		return
 	}
 
-	file, hdr, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "missing 'file' field", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	// Stage the upload to disk under the user's directory. /tmp on this
-	// container is a 64 MiB tmpfs — too small for a 200 MiB save.
 	stagingDir := filepath.Join(m.cfg.SavesRoot, uid, ".import-staging")
 	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
 		log.Printf("import: mkdir staging for %s: %v", uid, err)
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
-	// Best-effort cleanup of any previous staging artifacts.
-	defer func() {
-		_ = os.RemoveAll(stagingDir)
-	}()
+	defer func() { _ = os.RemoveAll(stagingDir) }()
 
-	tmpUpload, err := os.CreateTemp(stagingDir, "upload-*.bin")
-	if err != nil {
-		log.Printf("import: tempfile for %s: %v", uid, err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
-		return
-	}
-	tmpUploadPath := tmpUpload.Name()
-	if _, err := io.Copy(tmpUpload, file); err != nil {
-		tmpUpload.Close()
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+	var (
+		tmpUploadPath string
+		uploadName    string
+	)
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			var mbe *http.MaxBytesError
+			if errors.As(err, &mbe) {
+				http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "malformed upload", http.StatusBadRequest)
 			return
 		}
-		log.Printf("import: copy upload for %s: %v", uid, err)
-		http.Error(w, "upload failed", http.StatusBadRequest)
-		return
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+		uploadName = part.FileName()
+		tmpUpload, err := os.CreateTemp(stagingDir, "upload-*.bin")
+		if err != nil {
+			_ = part.Close()
+			log.Printf("import: tempfile for %s: %v", uid, err)
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
+		tmpUploadPath = tmpUpload.Name()
+		if _, err := io.Copy(tmpUpload, part); err != nil {
+			_ = part.Close()
+			tmpUpload.Close()
+			var mbe *http.MaxBytesError
+			if errors.As(err, &mbe) {
+				http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			log.Printf("import: copy upload for %s: %v", uid, err)
+			http.Error(w, "upload failed", http.StatusBadRequest)
+			return
+		}
+		_ = part.Close()
+		if err := tmpUpload.Close(); err != nil {
+			log.Printf("import: close upload for %s: %v", uid, err)
+			http.Error(w, "upload failed", http.StatusInternalServerError)
+			return
+		}
+		break
 	}
-	if err := tmpUpload.Close(); err != nil {
-		log.Printf("import: close upload for %s: %v", uid, err)
-		http.Error(w, "upload failed", http.StatusInternalServerError)
+	if tmpUploadPath == "" {
+		http.Error(w, "missing 'file' field", http.StatusBadRequest)
 		return
 	}
 
 	// Sniff format: PK\x03\x04 → zip; 1F 8B → gzip → assume tar.gz.
 	format, err := detectArchiveFormat(tmpUploadPath)
 	if err != nil {
-		log.Printf("import: detect format for %s (%s): %v", uid, hdr.Filename, err)
+		log.Printf("import: detect format for %s (%s): %v", uid, uploadName, err)
 		http.Error(w, "unrecognised archive (expected .zip or .tar.gz)", http.StatusBadRequest)
 		return
 	}
