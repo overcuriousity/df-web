@@ -30,7 +30,11 @@ RUN if [ -n "${DFHACK_VERSION}" ]; then \
         -O /tmp/dfhack.tar.bz2 \
       && tar -xjf /tmp/dfhack.tar.bz2 -C /opt/df \
       && rm /tmp/dfhack.tar.bz2 \
-      && printf '' > /opt/df/hack/dfhack_setarch.txt; \
+      && sed -i \
+           -e 's|setarch "\$setarch_arch" -R ||g' \
+           -e 's|exec setarch "\$setarch_arch" -R ||g' \
+           -e 's|strace -f setarch "\$setarch_arch" -R ||g' \
+           /opt/df/dfhack; \
     fi
 
 # PRINT_MODE:AUTO lets SDL2 auto-select the renderer (hardware or software).
