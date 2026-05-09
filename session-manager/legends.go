@@ -12,10 +12,12 @@ import (
 	"time"
 )
 
-// legendsNameRe matches DF's legends export filenames. Stricter than the prior
-// HasPrefix/HasSuffix pair, which let names like "legends..xml" through —
-// harmless today but a foothold if the path concat ever loses filepath.Join.
-var legendsNameRe = regexp.MustCompile(`^legends[A-Za-z0-9_.-]*\.xml$`)
+// legendsNameRe matches DF's legends export filenames. DF 50+/53.x writes
+// "<savename>-<datestamp>-legends.xml" (vanilla) and, when DFHack is loaded,
+// the extended "<savename>-<datestamp>-legends_plus.xml" — never a bare
+// "legends.xml". The character class is restrictive on purpose: only chars
+// DF itself produces in save/region names, no path separators or spaces.
+var legendsNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+-legends(_plus)?\.xml$`)
 
 // handleLegendsIndex lists legends XML exports for the user.
 func (m *Manager) handleLegendsIndex(w http.ResponseWriter, r *http.Request) {

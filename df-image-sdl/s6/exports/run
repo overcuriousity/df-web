@@ -1,0 +1,46 @@
+#!/bin/sh
+# Relay DF's user-export files (legends XML, world history, world map, etc.)
+# from the DF working directory into the bind-mounted data dir, so the web
+# UI can list and serve them.
+#
+# Why this exists: DF 50+/53.x writes saves to XDG paths (which are bind-
+# mounted), but the "Export Legends" / "Export Detailed Map" actions still
+# write to the DF root folder, i.e. cwd at launch time = /opt/df. Those
+# files would otherwise vanish with the container. We poll cwd for matching
+# patterns and move them into the bind-mounted tree.
+
+BIND_DIR="/root/.local/share/Bay 12 Games/Dwarf Fortress"
+SRC="/opt/df"
+
+mkdir -p "$BIND_DIR"
+
+# Patterns DF emits from legends mode and the detailed-map export.
+# Filenames are "<savename>-<datestamp>-<kind>.<ext>"; we match on the suffix
+# so any savename works.
+match_export() {
+    case "$1" in
+        *-legends.xml|*-legends_plus.xml) return 0 ;;
+        *-world_history.txt|*-world_sites_and_pops.txt) return 0 ;;
+        *-world_gen_param.txt) return 0 ;;
+        *-world_map.bmp|*-world_map.png|*-world_map.jpg) return 0 ;;
+        *-detailed.bmp|*-detailed.png) return 0 ;;
+    esac
+    return 1
+}
+
+while :; do
+    for f in "$SRC"/*; do
+        [ -f "$f" ] || continue
+        name=$(basename "$f")
+        if match_export "$name"; then
+            # Wait until the file looks settled (size unchanged for one tick)
+            # so we don't race DF mid-write on multi-gigabyte legends dumps.
+            s1=$(stat -c %s "$f" 2>/dev/null || echo 0)
+            sleep 1
+            s2=$(stat -c %s "$f" 2>/dev/null || echo 0)
+            [ "$s1" = "$s2" ] || continue
+            mv -f "$f" "$BIND_DIR/$name" 2>/dev/null || true
+        fi
+    done
+    sleep 3
+done
