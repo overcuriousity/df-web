@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"log"
 	"mime"
 	"net/http"
@@ -10,7 +12,15 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
+
+// xmlPrologRe matches an XML declaration so we can rewrite the encoding
+// attribute. DF writes single-quoted CP437; we transcode to UTF-8 and need
+// the prolog to agree, otherwise strict parsers may reject the document.
+var xmlPrologRe = regexp.MustCompile(`(?i)^<\?xml[^?]*\?>`)
 
 // legendsNameRe matches DF's legends export filenames. DF 50+/53.x writes
 // "<savename>-<datestamp>-legends.xml" (vanilla) and, when DFHack is loaded,
@@ -86,14 +96,41 @@ func (m *Manager) handleLegendsXML(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	modTime := time.Time{}
-	if info, err := f.Stat(); err == nil {
-		modTime = info.ModTime()
-	}
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	// Download keeps the raw bytes (CP437) so external tools that already
+	// understand DF's native encoding stay happy.
 	if r.URL.Query().Get("download") == "1" {
+		modTime := time.Time{}
+		if info, err := f.Stat(); err == nil {
+			modTime = info.ModTime()
+		}
+		w.Header().Set("Content-Type", "application/xml")
 		disp := mime.FormatMediaType("attachment", map[string]string{"filename": name})
 		w.Header().Set("Content-Disposition", disp)
+		http.ServeContent(w, r, name, modTime, f)
+		return
 	}
-	http.ServeContent(w, r, name, modTime, f)
+
+	// Inline view: transcode CP437 → UTF-8 and rewrite the prolog. DF emits
+	// `<?xml version="1.0" encoding='CP437'?>` and then uses CP437 control
+	// chars (0x01..0x1F have visible glyphs in DF) inside name strings. If
+	// served as UTF-8, those bytes are either replaced with U+FFFD or fail
+	// XML well-formedness — DOMParser bails partway through, leaving
+	// historical_figure / entity / historical_event empty.
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	br := bufio.NewReader(transform.NewReader(f, charmap.CodePage437.NewDecoder()))
+
+	// Pull the first 200 bytes to inspect the prolog. CP437 0x01..0x1F map
+	// to printable Unicode glyphs that ARE legal in XML content (smileys,
+	// suits, arrows, etc.), so once transcoded the body becomes valid.
+	head, _ := br.Peek(200)
+	if loc := xmlPrologRe.FindIndex(head); loc != nil {
+		if _, err := br.Discard(loc[1]); err != nil {
+			http.Error(w, "transcode error", http.StatusInternalServerError)
+			return
+		}
+		io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>`)
+	}
+	if _, err := io.Copy(w, br); err != nil {
+		log.Printf("legends: copy %s: %v", name, err)
+	}
 }
