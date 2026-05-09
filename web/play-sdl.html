@@ -183,8 +183,9 @@
 
 <dialog id="session-ended">
   <h3>[ Session ended ]</h3>
-  <p>Your game session has been put to sleep after a long period of inactivity.
-     Your progress was saved. Click below to start a fresh session.</p>
+  <p>Your game session was stopped after a long period of inactivity.
+     Only your last in-game save was kept — the wrapper does not save for you.
+     Click below to start a fresh session.</p>
   <div class="row">
     <button type="button" class="primary" onclick="resumeSession()">Resume</button>
   </div>
@@ -193,7 +194,7 @@
 <dialog id="idle-warning">
   <h3>[ Still there? ]</h3>
   <p>Your game session will end in <span id="idle-warning-secs">?</span> seconds because of inactivity.
-     Your progress will be saved automatically. Stay connected?</p>
+     <strong>Save in-game now</strong> — the wrapper will not save for you. Stay connected?</p>
   <div class="row">
     <button type="button" class="primary" onclick="keepPlaying()">Keep playing</button>
     <button type="button" onclick="dismissWarning()">Let it end</button>

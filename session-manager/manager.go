@@ -25,9 +25,10 @@ type containerInfo struct {
 	host     string // container hostname on df_internal, e.g. "df-alice"
 	port     int    // internal port (websockify, typically 6080)
 	lastSeen time.Time
-	// stopping is set by the idle reaper before it issues docker stop.
-	// While true, ensureContainer must refuse to spawn for this uid so the
-	// graceful quit-save isn't interrupted by a parallel docker rm -f.
+	// stopping is set before issuing docker stop. While true, ensureContainer
+	// must refuse to spawn for this uid so a concurrent /play reload doesn't
+	// race the in-flight `docker rm -f df-<uid>` against a fresh dockerRun
+	// for the same name.
 	stopping bool
 }
 
@@ -233,8 +234,9 @@ func (m *Manager) ensureContainer(uid, mode string) (*containerInfo, error) {
 
 	if ci, ok := m.containers[uid]; ok {
 		if ci.stopping {
-			// Reaper is mid-stop. Don't race it with a fresh dockerRun —
-			// the resulting docker rm -f would interrupt DF's quit-save.
+			// A stop is in flight. Don't race it with a fresh dockerRun —
+			// the in-flight `docker rm -f df-<uid>` would collide with a
+			// new container of the same name.
 			return nil, errSessionEnding
 		}
 		if dockerIsRunning(ci.id) {
@@ -398,17 +400,18 @@ func hasAnyContent(userRoot string) bool {
 	return false
 }
 
-// handleAccountExport stops the user's active container (flushing saves via the
-// quit-save sequence) and streams their data/ + config/ as a tar.gz download.
+// handleAccountExport stops the user's active container and streams their
+// data/ + config/ as a tar.gz download. The container is stopped first so the
+// archive captures whatever the player last saved in-game (DF holds save
+// files open while running and may overwrite them on its next autosave).
 func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	uid := uidFromContext(r.Context())
 
-	// Flag-then-stop-then-delete (mirrors handleSessionStop / idleReaper). Leaving
-	// the entry in the map with stopping=true is what blocks an ensureContainer
-	// race during the up-to-45s graceful stop: a concurrent /play reload finds
-	// the entry, sees stopping=true, and gets errSessionEnding instead of
-	// kicking off a fresh dockerRun whose `docker rm -f df-<uid>` would
-	// interrupt DF's quit-save and corrupt the very save we're exporting.
+	// Flag-then-stop-then-delete (mirrors handleSessionStop / idleReaper).
+	// stopping=true blocks an ensureContainer race during the stop: a
+	// concurrent /play reload sees the flag and gets errSessionEnding instead
+	// of kicking off a fresh dockerRun that would collide on the container
+	// name with the in-flight docker rm -f.
 	m.mu.Lock()
 	ci, hasContainer := m.containers[uid]
 	if hasContainer {
@@ -417,7 +420,7 @@ func (m *Manager) handleAccountExport(w http.ResponseWriter, r *http.Request) {
 	m.mu.Unlock()
 
 	if hasContainer {
-		log.Printf("export: stopping container %s for user %s (save flush)", ci.id[:12], uid)
+		log.Printf("export: stopping container %s for user %s", ci.id[:12], uid)
 		if err := dockerStop(ci.id); err != nil {
 			// Container is in an indeterminate state — DF may still be running
 			// and holding open save files. Refuse to stream rather than ship a
@@ -578,9 +581,10 @@ func (m *Manager) handleSessionKeepalive(w http.ResponseWriter, r *http.Request)
 }
 
 // handleSessionStop stops the user's active container without exporting saves.
-// Mirrors handleAccountExport's stop sequence (graceful SIGTERM → quit-save →
-// docker rm) so the session ends cleanly. Returns 204 on success, 409 if the
-// user has no active container.
+// Mirrors handleAccountExport's stop sequence (SIGTERM → DF exit → docker rm)
+// so the session ends cleanly. Does NOT trigger an in-game save — only the
+// last save the player made in DF is preserved. Returns 204 on success, 409
+// if the user has no active container.
 func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -592,11 +596,10 @@ func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	ci, ok := m.containers[uid]
 	if ok {
 		// Flag-then-stop-then-delete (mirrors idleReaper). Keeping the entry
-		// in the map with stopping=true is what blocks an ensureContainer
-		// race during the up-to-45s graceful stop: a /play reload finds the
-		// entry, sees stopping=true, and gets errSessionEnding instead of
-		// kicking off a fresh dockerRun whose `docker rm -f df-<uid>` would
-		// interrupt the quit-save.
+		// in the map with stopping=true blocks an ensureContainer race during
+		// the stop: a /play reload finds the entry, sees stopping=true, and
+		// gets errSessionEnding instead of kicking off a fresh dockerRun
+		// whose `docker rm -f df-<uid>` would collide on the container name.
 		ci.stopping = true
 	}
 	m.mu.Unlock()
@@ -623,11 +626,11 @@ func (m *Manager) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // idleReaper periodically stops containers that have been idle too long.
-//
-// The flag-then-stop-then-delete sequence is deliberate: ensureContainer
-// refuses to spawn for a uid whose entry has stopping=true, so a websocket
-// reconnect or page reload during the (up to 45 s) graceful stop cannot
-// race the reaper into issuing docker rm -f and clobbering DF's quit-save.
+// No in-game save is attempted — the player's last in-game save is what
+// survives. The flag-then-stop-then-delete sequence is deliberate:
+// ensureContainer refuses to spawn for a uid whose entry has stopping=true,
+// so a websocket reconnect or page reload during the stop cannot race the
+// reaper into issuing a fresh dockerRun that collides on the container name.
 func (m *Manager) idleReaper() {
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
