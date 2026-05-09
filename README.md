@@ -37,10 +37,11 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 Download the Linux classic build from [bay12games.com](https://www.bay12games.com/dwarves/) and extract it:
 
 ```bash
+mkdir -p df-image-base/df
 tar -xjf df_53.12_linux.tar.bz2 -C df-image-base/df --strip-components=1
 ```
 
-`df-image-base/df/` must contain `dwarfort`, `data/`, `raw/`, etc.
+`tar -C` does not auto-create the destination, so the `mkdir` is required on a fresh clone. `df-image-base/df/` must end up containing `dwarfort`, `data/`, `raw/`, etc.
 
 ### 2. Configure
 
@@ -88,7 +89,7 @@ docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
 ```
 
-**With DFHack** (optional — enables in-game `manipulator` + web labor panel):
+**With DFHack** (optional — enables the in-game `manipulator` and unlocks the `/therapist` page):
 ```bash
 docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.12-r1 ./df-image-sdl
@@ -113,15 +114,26 @@ Point your reverse proxy at `http://127.0.0.1:8080`.
 
 ## Updating
 
-After pulling new commits, rebuild and redeploy:
+`docker-compose.yml` only owns the `session-manager` image. The two game images (`df-image-base`, `df-image-sdl`) are built outside compose and are therefore **not** rebuilt by `docker compose build`. After pulling, rebuild whichever images the new commits touched:
 
 ```bash
 git pull
-docker compose build --no-cache
+
+# Always: rebuild and restart the session manager.
+docker compose build --no-cache session-manager
 docker compose up -d
+
+# Only if df-image-base/ or its tilesets changed:
+docker build -t df-image-base ./df-image-base
+
+# Only if df-image-sdl/ changed (Dockerfile, s6/, hack/scripts/, dfhack-config/, …).
+# Use the --build-arg you used at install time, or drop it for vanilla.
+docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.12-r1 ./df-image-sdl
 ```
 
-Use `--no-cache` whenever Dockerfiles change (including base image layers). Running the old image after a fix to image-layer behaviour (e.g. save directory wiring) will silently keep the bug active.
+Use `--no-cache` whenever Dockerfiles change (including base image layers). Running the old image after a fix to image-layer behaviour (e.g. save directory wiring or DFHack scripts) will silently keep the bug active.
+
+Already-running game containers continue with the **old** `df-image-sdl` until the user stops their session and starts a new one. To force everyone onto the new image immediately, stop their containers (`docker rm -f $(docker ps -q --filter name=df-)`) — the next `/play` will spawn fresh; in-game saves persist via the bind-mounted data dir.
 
 ## Configuration
 
