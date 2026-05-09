@@ -2,11 +2,11 @@
 # Wait for Xvfb to create its socket before starting VNC.
 until [ -S /tmp/.X11-unix/X0 ]; do sleep 0.2; done
 
-# Replace the default X11 root cursor (the "X" glyph from the cursor font) with
-# a normal arrow. Without this, anywhere DF's SDL window doesn't claim its own
-# cursor the user sees the X-shape, which makes targeting GUI elements hard.
-DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null || true
-
+# Force x11vnc to send a static arrow as the cursor shape to every client.
+# Without -cursor arrow, x11vnc tries to read the real X cursor via XFIXES; on
+# headless Xvfb with no window manager and no cursor font it falls back to its
+# built-in "X" glyph, which is what the user sees in the browser. -cursor arrow
+# bypasses that path entirely and is independent of xsetroot/xfonts-base.
 exec x11vnc \
     -display :0 \
     -forever \
@@ -16,4 +16,5 @@ exec x11vnc \
     -noxdamage \
     -noipv6 \
     -xkb \
+    -cursor arrow \
     -quiet 2>&1
