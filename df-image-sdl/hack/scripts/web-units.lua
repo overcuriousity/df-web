@@ -24,7 +24,7 @@ for i = 0, #units - 1 do
         end
         result[#result + 1] = {
             id         = u.id,
-            name       = dfhack.TranslateName(dfhack.units.getVisibleName(u)),
+            name       = dfhack.df2utf(dfhack.units.getReadableName(u)),
             profession = dfhack.units.getProfessionName(u),
             labors     = labors,
         }
