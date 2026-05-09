@@ -72,16 +72,10 @@
   #tl-empty   { color: #666; font-size: 0.8rem; font-style: italic; padding-top: 0.5rem; }
 
   /* Dwarves */
-  #dwarf-status { font-size: 0.75rem; color: #888; margin-bottom: 0.4rem; }
-  .dwarf-row { border-bottom: 1px solid #2a2420; padding: 0.4rem 0; }
-  .dwarf-name { font-size: 0.82rem; color: #c8a870; cursor: pointer; }
-  .dwarf-name::before { content: '▶ '; font-size: 0.7rem; color: #555; }
-  .dwarf-name.open::before { content: '▼ '; }
+  .dwarf-row { border-bottom: 1px solid #2a2420; padding: 0.35rem 0; }
+  .dwarf-name { font-size: 0.82rem; color: #c8a870; }
   .dwarf-prof { font-size: 0.72rem; color: #888; margin-left: 0.8rem; }
-  .labor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.15rem 0.5rem;
-                margin: 0.4rem 0 0.2rem 0.8rem; }
-  .labor-item { display: flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: #aaa; }
-  .labor-item input { accent-color: #8b7355; cursor: pointer; }
+  .dwarf-prof em { color: #aaa; font-style: italic; }
 
   /* Dialogs */
   #idle-warning, #session-ended { background: #242018; color: #d0c8b0; border: 1px solid #c8a870; border-radius: 4px;
@@ -167,10 +161,12 @@
           <div id="tl-empty" style="display:none">No events yet — play for a while.</div>
         </div>
 
-        <!-- Dwarves tab -->
+        <!-- Dwarves tab — read-only roster; full-fat Dwarf-Therapist UI lives at /therapist -->
         <div id="tab-dwarves" style="display:none">
-          <div id="dwarf-status">
-            <button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button>
+          <div id="dwarf-toolbar" style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;">
+            <button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button>
+            <a class="btn-sm" href="/therapist" target="_blank" rel="noopener" style="text-decoration:none;">Open full view &#8599;</a>
+            <span id="dwarf-status" style="color:#888;font-size:0.75rem;"></span>
           </div>
           <div id="dwarf-list"></div>
         </div>
@@ -510,61 +506,35 @@ function prependEvent(ev) {
   while (list.children.length > 200) list.removeChild(list.lastChild);
 }
 
-// ---- Dwarves (labor panel) ----------------------------------------------------
-// Subset of DF labor IDs mapped to names. Full list has 120 entries;
-// this covers the ones players most commonly care about.
-const LABOR_NAMES = {
-  0:'Mining', 1:'Woodcutting', 2:'Carpentry', 3:'Detailing', 4:'Masonry',
-  5:'Architecture', 6:'Dye making', 7:'Weaving', 8:'Clothing', 9:'Wood burning',
-  10:'Pottery', 11:'Glassmaking', 12:'Gem cutting', 13:'Gem setting', 14:'Metalsmithing',
-  15:'Forge armor', 16:'Forge weapons', 17:'Forge tools', 18:'Forge mechanisms',
-  19:'Blacksmithing', 20:'Strand extraction', 21:'Siege operation', 22:'Siege engineering',
-  23:'Bowyer', 24:'Medicine', 25:'Surgery', 26:'Bone setting', 27:'Suturing',
-  28:'Dressing wounds', 29:'Diagnose', 30:'Anatomy', 31:'Trapping', 32:'Stone craft',
-  33:'Bone carving', 34:'Leather work', 35:'Butchering', 36:'Tanning',
-  37:'Plant gathering', 38:'Milking', 39:'Cheese making', 40:'Cook', 41:'Brew',
-  42:'Farm plot', 43:'Herbalism', 44:'Hunting', 45:'Animal training',
-  46:'Animal care', 47:'Fish dissection', 48:'Fishing', 49:'Mechanics',
-  50:'Haul goods', 51:'Haul stone', 52:'Haul wood', 53:'Haul body',
-  54:'Haul food', 55:'Haul refuse', 56:'Haul item', 57:'Haul animals',
-  58:'Load catapult', 59:'Smelting', 60:'Fertilize', 61:'Soap making',
-  62:'Remove construction', 63:'Construct buildings', 64:'Custom reaction',
-};
-
-const LABOR_GROUPS = [
-  { label: 'Mining & Felling', ids: [0,1] },
-  { label: 'Crafting', ids: [2,3,4,5,32,33,12,13,10,11,7,8,6,23,9] },
-  { label: 'Metalwork', ids: [14,15,16,17,18,19,59] },
-  { label: 'Farming & Food', ids: [42,43,37,41,40,39,38,31,48,47] },
-  { label: 'Animals', ids: [44,45,46,35,36,34] },
-  { label: 'Medicine', ids: [24,25,26,27,28,29,30] },
-  { label: 'Hauling', ids: [50,51,52,53,54,55,56,57,58] },
-  { label: 'Construction', ids: [63,62,49,22,21,61,60] },
-];
-
+// ---- Dwarves (read-only roster) -----------------------------------------------
+// At-a-glance only — the full Dwarf-Therapist replica lives at /therapist.
 let dwarfData = [];
-let openDwarf = null;
 
 async function loadDwarves() {
   const list = document.getElementById('dwarf-list');
   const status = document.getElementById('dwarf-status');
   list.innerHTML = '';
-  status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">Loading…</span>';
+  status.textContent = 'Loading…';
+  status.style.color = '#888';
   try {
     const r = await fetch('/play/dfhack/units');
     if (!r.ok) {
       if (r.status === 404) {
-        status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">(session not active)</span>';
-      } else if (r.status === 503) {
-        status.innerHTML = '<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#c06060;font-size:0.75rem;">DFHack unavailable — check in-game manipulator instead</span>';
+        status.textContent = '(session not active)';
+        status.style.color = '#888';
+      } else {
+        status.textContent = 'DFHack unavailable';
+        status.style.color = '#c06060';
       }
       return;
     }
     dwarfData = await r.json() || [];
-    status.innerHTML = `<button class="btn-sm" onclick="loadDwarves()" style="margin-bottom:0.4rem;">&#x21bb; Refresh</button> <span style="color:#888;font-size:0.75rem;">${dwarfData.length} citizens</span>`;
+    status.textContent = `${dwarfData.length} citizens`;
+    status.style.color = '#888';
     renderDwarves();
   } catch (e) {
-    status.innerHTML = `<button class="btn-sm" onclick="loadDwarves()">&#x21bb; Refresh</button> <span style="color:#c06060;font-size:0.75rem;">${esc(e.message)}</span>`;
+    status.textContent = e.message;
+    status.style.color = '#c06060';
   }
 }
 
@@ -572,75 +542,22 @@ function renderDwarves() {
   const list = document.getElementById('dwarf-list');
   list.innerHTML = '';
   for (const d of dwarfData) {
-    const div = document.createElement('div');
-    div.className = 'dwarf-row';
-    const header = document.createElement('div');
-    header.className = 'dwarf-name' + (openDwarf === d.id ? ' open' : '');
-    header.textContent = d.name || '(unnamed)';
-    header.onclick = () => toggleDwarf(d, header, div);
-    const prof = document.createElement('div');
-    prof.className = 'dwarf-prof';
-    prof.textContent = d.profession || '';
-    div.appendChild(header);
-    div.appendChild(prof);
-    if (openDwarf === d.id) appendLaborGrid(d, div);
-    list.appendChild(div);
-  }
-}
-
-function toggleDwarf(d, header, container) {
-  const wasOpen = openDwarf === d.id;
-  openDwarf = wasOpen ? null : d.id;
-  header.classList.toggle('open', !wasOpen);
-  // Remove existing grid
-  const old = container.querySelector('.labor-grid');
-  if (old) old.remove();
-  if (!wasOpen) appendLaborGrid(d, container);
-}
-
-function appendLaborGrid(d, container) {
-  const laborSet = new Set(d.labors || []);
-  const grid = document.createElement('div');
-  grid.className = 'labor-grid';
-  // Show only groups with known labor IDs
-  for (const group of LABOR_GROUPS) {
-    const groupLabel = document.createElement('div');
-    groupLabel.style.cssText = 'grid-column:1/-1;color:#666;font-size:0.7rem;margin-top:0.3rem;';
-    groupLabel.textContent = '— ' + group.label + ' —';
-    grid.appendChild(groupLabel);
-    for (const lid of group.ids) {
-      const item = document.createElement('label');
-      item.className = 'labor-item';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = laborSet.has(lid);
-      cb.dataset.unitId = d.id;
-      cb.dataset.laborId = lid;
-      cb.addEventListener('change', onLaborToggle);
-      item.appendChild(cb);
-      item.appendChild(document.createTextNode(LABOR_NAMES[lid] || 'Labor ' + lid));
-      grid.appendChild(item);
-    }
-  }
-  container.appendChild(grid);
-}
-
-async function onLaborToggle(e) {
-  const cb = e.target;
-  const unitId = parseInt(cb.dataset.unitId);
-  const laborId = parseInt(cb.dataset.laborId);
-  const enabled = cb.checked;
-  try {
-    const r = await fetch('/play/dfhack/labor', {
-      method: 'POST',
-      body: JSON.stringify({ unit_id: unitId, labor: laborId, enabled }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!r.ok) {
-      cb.checked = !enabled; // revert on error
-    }
-  } catch (_) {
-    cb.checked = !enabled;
+    const row = document.createElement('div');
+    row.className = 'dwarf-row';
+    const head = document.createElement('div');
+    head.className = 'dwarf-name';
+    head.textContent = d.name || '(unnamed)';
+    const meta = document.createElement('div');
+    meta.className = 'dwarf-prof';
+    const parts = [];
+    if (d.profession) parts.push(esc(d.profession));
+    if (typeof d.age === 'number') parts.push(`${d.age} yrs`);
+    if (d.current_job && d.current_job !== 'No Job') parts.push(`<em>${esc(d.current_job)}</em>`);
+    if (d.happiness && d.happiness !== 'Unknown') parts.push(esc(d.happiness));
+    meta.innerHTML = parts.join(' · ');
+    row.appendChild(head);
+    row.appendChild(meta);
+    list.appendChild(row);
   }
 }
 

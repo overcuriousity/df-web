@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="/static/favicon.ico">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta charset="utf-8">
+<title>Therapist — Dwarf Fortress</title>
+<style>
+  :root {
+    --bg: #1a1a1a; --bg-2: #242018; --fg: #d0c8b0; --fg-dim: #8a8470;
+    --gold: #c8a870; --accent: #8b7355; --border: #3a3028; --border-2: #2a2420;
+    --good: #6ec06e; --bad: #c06060; --warn: #d4a14a;
+    --skill-0: #2a2420; --skill-1: #3b3024; --skill-3: #574028; --skill-5: #735028;
+    --skill-9: #8b6a30; --skill-12: #b88a30; --skill-15: #d4b048;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--fg); font-family: 'Courier New', monospace; font-size: 12px; overflow: hidden; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--gold); }
+
+  /* Layout */
+  .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; }
+  header.bar { background: var(--bg-2); border-bottom: 1px solid var(--border); padding: 0.4rem 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  header.bar h1 { color: var(--gold); font-size: 13px; font-weight: normal; letter-spacing: 0.1em; margin-right: 0.6rem; }
+  header.bar .grow { flex: 1; }
+  header.bar .pop { color: var(--fg-dim); font-size: 11px; }
+  header.bar .pending-count { color: var(--warn); font-weight: bold; }
+  .banner { background: #2a241a; color: var(--warn); padding: 0.3rem 0.6rem; font-size: 11px; border-bottom: 1px solid var(--border); }
+
+  main.body { display: grid; grid-template-columns: 240px 1fr 240px; min-height: 0; }
+  aside.docks { background: var(--bg-2); border-right: 1px solid var(--border); overflow-y: auto; }
+  aside.docks.right { border-right: 0; border-left: 1px solid var(--border); }
+  section.grid-pane { display: grid; grid-template-rows: auto auto 1fr; min-width: 0; min-height: 0; }
+  footer.status { background: var(--bg-2); border-top: 1px solid var(--border); padding: 0.25rem 0.6rem; font-size: 11px; color: var(--fg-dim); display: flex; gap: 1rem; flex-wrap: wrap; }
+
+  /* Toolbar widgets */
+  .btn, button.btn-sm, .btn-sm {
+    padding: 0.25rem 0.55rem; background: var(--border); color: var(--fg);
+    border: 1px solid var(--accent); border-radius: 3px; cursor: pointer;
+    font: inherit; font-size: 11px;
+  }
+  .btn:hover, .btn-sm:hover { background: #5a4a38; }
+  .btn.warn { color: var(--warn); border-color: var(--warn); }
+  .btn.good { color: var(--good); border-color: var(--good); }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  select, input[type=text], input[type=search] {
+    background: var(--border); color: var(--fg); border: 1px solid var(--accent);
+    padding: 0.2rem 0.4rem; border-radius: 3px; font: inherit; font-size: 11px;
+  }
+
+  /* Docks */
+  .dock { border-bottom: 1px solid var(--border); }
+  .dock h3 { color: var(--gold); font-size: 11px; padding: 0.4rem 0.5rem 0.25rem; letter-spacing: 0.08em; cursor: pointer; user-select: none; }
+  .dock h3::before { content: '▼ '; color: var(--fg-dim); font-size: 9px; }
+  .dock.collapsed h3::before { content: '▶ '; }
+  .dock.collapsed .dock-body { display: none; }
+  .dock-body { padding: 0.2rem 0.5rem 0.5rem; font-size: 11px; }
+  .dock-body label { display: block; color: var(--fg-dim); margin: 0.2rem 0 0.05rem; font-size: 10px; }
+  .dock-body .row { display: flex; gap: 0.3rem; align-items: center; margin: 0.15rem 0; }
+  .dock-body .row .grow { flex: 1; min-width: 0; }
+  .filter-list { max-height: 200px; overflow-y: auto; }
+  .filter-list label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; color: var(--fg); font-size: 11px; padding: 0.05rem 0; }
+  .filter-list label:hover { background: #2a241a; }
+
+  /* Pending list */
+  .pending-list { font-size: 11px; max-height: 240px; overflow-y: auto; }
+  .pending-list li { list-style: none; padding: 0.15rem 0; border-bottom: 1px dotted var(--border-2); display: flex; gap: 0.3rem; }
+  .pending-list .who { color: var(--gold); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pending-list .what { color: var(--fg-dim); }
+
+  /* Detail dock */
+  .detail-name { color: var(--gold); font-size: 12px; margin-bottom: 0.2rem; }
+  .detail-meta { color: var(--fg-dim); margin-bottom: 0.4rem; font-size: 10px; }
+  .detail-section { margin-top: 0.4rem; }
+  .detail-section h4 { color: var(--accent); font-size: 10px; letter-spacing: 0.08em; margin-bottom: 0.15rem; }
+  .detail-list { font-size: 11px; }
+  .detail-list .kv { display: flex; gap: 0.3rem; }
+  .detail-list .kv .k { color: var(--fg-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .detail-list .kv .v { color: var(--fg); }
+  .nick-input { width: 100%; }
+
+  /* View tabs */
+  .view-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg-2); overflow-x: auto; }
+  .view-tab { padding: 0.4rem 0.9rem; cursor: pointer; color: var(--fg-dim); font-size: 11px; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .view-tab:hover { color: var(--fg); }
+  .view-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+  .grid-toolbar { display: flex; gap: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-2); border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; font-size: 11px; }
+  .grid-toolbar label { color: var(--fg-dim); font-size: 10px; }
+
+  /* Main grid */
+  .grid-scroll { overflow: auto; min-height: 0; }
+  table.dt {
+    border-collapse: separate; border-spacing: 0;
+    font-family: 'Courier New', monospace; font-size: 11px;
+  }
+  table.dt th, table.dt td {
+    border-right: 1px solid var(--border-2);
+    border-bottom: 1px solid var(--border-2);
+    padding: 1px 4px; white-space: nowrap;
+    text-align: center; min-width: 22px;
+  }
+  table.dt th { background: var(--bg-2); color: var(--fg-dim); font-weight: normal; cursor: pointer; user-select: none; padding: 3px 4px; }
+  table.dt th:hover { color: var(--gold); }
+  table.dt th.sorted::after { content: ' ▲'; color: var(--gold); }
+  table.dt th.sorted.desc::after { content: ' ▼'; }
+  table.dt th.tranche { background: #2a241a; color: var(--warn); border-right: 2px solid var(--accent); border-bottom: 1px solid var(--accent); }
+  table.dt th.col-name { text-align: left; min-width: 220px; padding-left: 6px; }
+  table.dt th.col-misc { min-width: 70px; }
+  table.dt th.first-data { border-left: 2px solid var(--accent); }
+  table.dt thead th { position: sticky; top: 0; z-index: 3; }
+  table.dt thead tr.tranches th { top: 0; }
+  table.dt thead tr.cols th { top: 22px; }
+  table.dt th.col-name, table.dt td.col-name { position: sticky; left: 0; z-index: 2; background: var(--bg); text-align: left; padding-left: 6px; }
+  table.dt thead th.col-name { z-index: 4; background: var(--bg-2); }
+  table.dt tr.group td {
+    background: #2a241a; color: var(--gold); text-align: left; padding-left: 6px;
+    cursor: pointer; user-select: none; border-bottom: 1px solid var(--accent);
+  }
+  table.dt tr.group td::before { content: '▼ '; color: var(--fg-dim); }
+  table.dt tr.group.collapsed td::before { content: '▶ '; }
+  table.dt tr.unit:hover { background: #1f1c14; }
+  table.dt tr.unit.selected { background: #2a241a; }
+  table.dt td.col-name { color: var(--fg); cursor: pointer; }
+  table.dt tr.unit.selected td.col-name { background: #2a241a; }
+  table.dt td.legendary { font-weight: bold; }
+  table.dt td.pending { box-shadow: inset 0 0 0 2px var(--bad); }
+
+  /* Skill cell colors */
+  .sk-0  { background: var(--skill-0);  color: #555; }
+  .sk-1  { background: var(--skill-1);  color: #888; }
+  .sk-2  { background: var(--skill-1);  color: #998; }
+  .sk-3  { background: var(--skill-3);  color: #b8a070; }
+  .sk-4  { background: var(--skill-3);  color: #c8b08a; }
+  .sk-5  { background: var(--skill-5);  color: #e0c090; }
+  .sk-9  { background: var(--skill-9);  color: #f0d8a0; }
+  .sk-12 { background: var(--skill-12); color: #fff8c8; }
+  .sk-15 { background: var(--skill-15); color: #fff; font-weight: bold; }
+  td.lab-on  { background: #4a3820; color: #f0c870; }
+  td.lab-off { background: var(--bg); color: #555; }
+  td.lab-cell { cursor: pointer; min-width: 26px; }
+
+  td.attr.tier-pos2 { color: var(--good); }
+  td.attr.tier-pos1 { color: #a8d090; }
+  td.attr.tier-neg1 { color: #c0a070; }
+  td.attr.tier-neg2 { color: var(--bad); }
+
+  td.role { font-weight: bold; }
+  td.role.r-100 { background: var(--gold); color: #1a1a1a; }
+  td.role.r-80  { background: var(--skill-9); color: #fff; }
+  td.role.r-60  { background: var(--skill-5); color: var(--fg); }
+  td.role.r-40  { background: var(--skill-3); color: var(--fg-dim); }
+  td.role.r-20  { background: var(--skill-1); color: var(--fg-dim); }
+  td.role.r-0   { background: var(--skill-0); color: #555; }
+
+  /* Happiness cell */
+  td.happy.h-Ecstatic     { background: #1f4f1f; color: #c0e0c0; }
+  td.happy.h-Happy        { background: #2a4f2a; color: #b0d8b0; }
+  td.happy.h-Content      { background: #2f3f2a; color: #b0c8a0; }
+  td.happy.h-Fine         { background: #3a3a28; color: #c0b890; }
+  td.happy.h-Unhappy      { background: #4a3020; color: #d0a880; }
+  td.happy.h-VeryUnhappy  { background: #5a2820; color: #e0a070; }
+  td.happy.h-Miserable    { background: #6a1818; color: #f08080; }
+  td.happy.h-Unknown      { background: var(--bg); color: var(--fg-dim); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+
+<header class="bar">
+  <h1>[ THERAPIST ]</h1>
+  <button class="btn" onclick="reload()" title="Refresh data (Ctrl+R)">↻ Refresh</button>
+  <label>Group <select id="group-sel" onchange="onGroupChange()"></select></label>
+  <input type="search" id="filter" placeholder="filter…" oninput="onFilterChange()">
+  <label><input type="checkbox" id="auto-refresh" onchange="onAutoRefresh()"> auto-refresh</label>
+  <span class="grow"></span>
+  <span class="pop" id="pop-summary"></span>
+  <button class="btn good" id="commit-btn" onclick="commitPending()" title="Commit pending changes (Ctrl+T)">✓ Commit <span class="pending-count" id="pending-count">0</span></button>
+  <button class="btn warn" onclick="clearPending()" title="Clear pending changes (Ctrl+E)">✗ Clear</button>
+  <button class="btn" onclick="runOptimize()" title="Run optimizer">⚙ Optimize</button>
+  <button class="btn" onclick="exportCSV()" title="Export current view as CSV">↓ CSV</button>
+  <a class="btn" href="/play" title="Back to game">← Game</a>
+</header>
+
+<div class="banner" id="caveat-banner">
+  Note — DF 53.x's <em>Work Details</em> system reasserts labor flags every tick, so per-labor toggles here may revert. Use this to read state and to set nicknames / custom professions; for production labor management, manage Work Details in-game.
+</div>
+
+<main class="body">
+
+  <aside class="docks left">
+    <div class="dock" id="dock-details">
+      <h3 onclick="toggleDock('details')">Dwarf Details</h3>
+      <div class="dock-body" id="dock-details-body">
+        <em style="color:var(--fg-dim)">Click a row to inspect.</em>
+      </div>
+    </div>
+    <div class="dock" id="dock-pending">
+      <h3 onclick="toggleDock('pending')">Pending Changes (<span id="pending-count-2">0</span>)</h3>
+      <div class="dock-body">
+        <ul class="pending-list" id="pending-list"></ul>
+      </div>
+    </div>
+    <div class="dock" id="dock-custom">
+      <h3 onclick="toggleDock('custom')">Custom Professions</h3>
+      <div class="dock-body">
+        <div class="row">
+          <input type="text" id="custom-name" placeholder="name…" class="grow">
+          <button class="btn-sm" onclick="saveCustomFromSelection()">Save from selected</button>
+        </div>
+        <div id="custom-list" style="margin-top:0.4rem;"></div>
+      </div>
+    </div>
+    <div class="dock" id="dock-views">
+      <h3 onclick="toggleDock('views')">Grid Views</h3>
+      <div class="dock-body" style="font-size:10px;color:var(--fg-dim);">
+        Built-in views switch via the tabs above. Custom view persistence is local to this browser.
+      </div>
+    </div>
+  </aside>
+
+  <section class="grid-pane">
+    <nav class="view-tabs" id="view-tabs"></nav>
+    <div class="grid-toolbar">
+      <label>Sort
+        <select id="sort-sel" onchange="onSortChange()"></select>
+      </label>
+      <label><input type="checkbox" id="show-pending-only" onchange="render()"> only with pending</label>
+      <span class="grow"></span>
+      <span style="color:var(--fg-dim);font-size:10px;" id="grid-counts"></span>
+    </div>
+    <div class="grid-scroll" id="grid-scroll">
+      <table class="dt" id="grid"></table>
+    </div>
+  </section>
+
+  <aside class="docks right">
+    <div class="dock" id="dock-legend">
+      <h3 onclick="toggleDock('legend')">Skill Legend</h3>
+      <div class="dock-body" id="legend-body"></div>
+    </div>
+    <div class="dock" id="dock-prefs">
+      <h3 onclick="toggleDock('prefs')">Preferences</h3>
+      <div class="dock-body filter-list" id="prefs-list"><em style="color:var(--fg-dim)">load data…</em></div>
+    </div>
+    <div class="dock" id="dock-thoughts">
+      <h3 onclick="toggleDock('thoughts')">Health</h3>
+      <div class="dock-body filter-list" id="health-filter-list"></div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="status">
+  <span id="status-msg">Loading…</span>
+  <span class="grow"></span>
+  <span id="status-version"></span>
+</footer>
+
+</div>
+
+<script>
+'use strict';
+
+// ============================================================================
+// State
+// ============================================================================
+
+const VIEWS = [
+  { id: 'overview',   label: 'Overview' },
+  { id: 'labors',     label: 'Labors' },
+  { id: 'skills',     label: 'Skills' },
+  { id: 'attrs',      label: 'Attributes' },
+  { id: 'roles',      label: 'Roles' },
+  { id: 'social',     label: 'Social' },
+  { id: 'military',   label: 'Military' },
+  { id: 'health',     label: 'Health' },
+  { id: 'animals',    label: 'Animals' },
+];
+
+const GROUPS = [
+  { id: 'none',       label: 'No grouping',     fn: (_u) => '' },
+  { id: 'profession', label: 'Profession',      fn: u => u.profession || '(none)' },
+  { id: 'wave',       label: 'Migration Wave',  fn: u => 'Wave ' + (u.wave || 0) },
+  { id: 'caste',      label: 'Caste',           fn: u => u.caste || '(?)' },
+  { id: 'sex',        label: 'Sex',             fn: u => u.caste || '(?)' },
+  { id: 'happiness',  label: 'Happiness',       fn: u => u.happiness || 'Unknown' },
+  { id: 'has-nick',   label: 'Has Nickname',    fn: u => u.nickname ? 'With nickname' : 'Without nickname' },
+  { id: 'legendary',  label: 'Legendary',       fn: u => u.legendary ? 'Legendary' : 'Mortal' },
+  { id: 'squad',      label: 'Squad',           fn: u => (u.squad && u.squad.id >= 0) ? (u.squad.name || ('Squad ' + u.squad.id)) : 'Civilian' },
+  { id: 'totlabors',  label: 'Total Labors',    fn: u => 'Labors ' + bucket10(u.labors.filter(Boolean).length) },
+  { id: 'agetier',    label: 'Age Tier (10y)',  fn: u => 'Age ' + Math.floor((u.age||0)/10)*10 + 's' },
+];
+
+function bucket10(n) { return Math.floor(n / 10) * 10 + '-' + (Math.floor(n/10)*10 + 9); }
+
+const STRESS_BUCKETS = ['Ecstatic','Happy','Content','Fine','Unhappy','VeryUnhappy','Miserable'];
+
+const SKILL_LEVELS = [
+  // DT-style descriptors; rating index → name + tier color class.
+  { name: 'Dabbling',     cls: 'sk-1'  }, // 0
+  { name: 'Novice',       cls: 'sk-1'  }, // 1
+  { name: 'Adequate',     cls: 'sk-2'  }, // 2
+  { name: 'Competent',    cls: 'sk-3'  }, // 3
+  { name: 'Skilled',      cls: 'sk-4'  }, // 4
+  { name: 'Proficient',   cls: 'sk-5'  }, // 5
+  { name: 'Talented',     cls: 'sk-5'  }, // 6
+  { name: 'Adept',        cls: 'sk-9'  }, // 7
+  { name: 'Expert',       cls: 'sk-9'  }, // 8
+  { name: 'Professional', cls: 'sk-9'  }, // 9
+  { name: 'Accomplished', cls: 'sk-12' }, // 10
+  { name: 'Great',        cls: 'sk-12' }, // 11
+  { name: 'Master',       cls: 'sk-12' }, // 12
+  { name: 'High Master',  cls: 'sk-15' }, // 13
+  { name: 'Grand Master', cls: 'sk-15' }, // 14
+  { name: 'Legendary',    cls: 'sk-15' }, // 15+
+];
+
+const state = {
+  loaded: false,
+  year: 0,
+  version: { df: '', dfhack: '' },
+  enums: { labor: {}, skill: {}, attr_phys: [], attr_ment: [], trait: {}, need: {} },
+  roles: [],
+  units: [],
+  animals: [],
+  view: 'overview',
+  group: 'none',
+  sort: { col: 'name', dir: 1 },
+  filter: '',
+  selectedUnitId: null,
+  pending: { labors: [], nicknames: [], custom_profession: [] },
+  collapsedGroups: new Set(),
+  ui: { docks: {}, autoRefresh: false },
+  customProfessions: [],
+  laborTranches: [],
+  filtersOn: { health: new Set(), prefs: new Set() },
+};
+
+// ============================================================================
+// Persistence
+// ============================================================================
+
+function loadUI() {
+  try {
+    const s = JSON.parse(localStorage.getItem('therapist.ui') || '{}');
+    if (s.view) state.view = s.view;
+    if (s.group) state.group = s.group;
+    if (s.sort) state.sort = s.sort;
+    if (s.filter) state.filter = s.filter;
+    if (s.docks) state.ui.docks = s.docks;
+    if (s.collapsedGroups) state.collapsedGroups = new Set(s.collapsedGroups);
+    if (Array.isArray(s.customProfessions)) state.customProfessions = s.customProfessions;
+  } catch (_) {}
+}
+function saveUI() {
+  localStorage.setItem('therapist.ui', JSON.stringify({
+    view: state.view, group: state.group, sort: state.sort, filter: state.filter,
+    docks: state.ui.docks, collapsedGroups: [...state.collapsedGroups],
+    customProfessions: state.customProfessions,
+  }));
+}
+
+// ============================================================================
+// Util
+// ============================================================================
+
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function $(id) { return document.getElementById(id); }
+function statusMsg(t, color) { const el = $('status-msg'); el.textContent = t; el.style.color = color || ''; }
+
+// ============================================================================
+// Data loading
+// ============================================================================
+
+async function reload() {
+  statusMsg('Loading…');
+  try {
+    const r = await fetch('/play/dfhack/units/full');
+    if (!r.ok) {
+      if (r.status === 404) { statusMsg('No active session.', 'var(--bad)'); return; }
+      statusMsg('DFHack unavailable: ' + (await r.text()), 'var(--bad)'); return;
+    }
+    const doc = await r.json();
+    state.year = doc.year || 0;
+    state.version = doc.version || {};
+    state.enums = doc.enums || {};
+    state.roles = doc.roles || [];
+    state.units = (doc.units || []).map(u => ({
+      ...u,
+      age: (state.year && u.birth_year) ? Math.max(0, state.year - u.birth_year) : 0,
+    }));
+    state.loaded = true;
+    state.laborTranches = computeLaborTranches(state.enums.labor);
+    if (state.view === 'animals') await loadAnimals();
+    rebuildSortOptions();
+    rebuildLegend();
+    rebuildPrefsFilter();
+    rebuildHealthFilter();
+    render();
+    $('status-version').textContent =
+      'DF ' + (state.version.df || '?') + '  ·  DFHack ' + (state.version.dfhack || '?') +
+      '  ·  Year ' + state.year + '  ·  ' + state.units.length + ' citizens';
+    statusMsg('OK');
+  } catch (e) {
+    statusMsg('Error: ' + e.message, 'var(--bad)');
+  }
+}
+
+async function loadAnimals() {
+  try {
+    const r = await fetch('/play/dfhack/animals');
+    if (r.ok) state.animals = await r.json() || [];
+    else state.animals = [];
+  } catch (_) { state.animals = []; }
+}
+
+// ============================================================================
+// Labor tranches (DT-inspired groupings, derived from enum names so we don't
+// hardcode IDs that drift between DF versions)
+// ============================================================================
+
+function computeLaborTranches(laborMap) {
+  const tranches = [
+    { name: 'Miners',         match: /^MINE$/ },
+    { name: 'Woodworkers',    match: /^(CUTWOOD|CARPENTER|BOWYER|WOOD_)/ },
+    { name: 'Stoneworkers',   match: /^(MASON|STONE_CRAFT|DETAIL)/ },
+    { name: 'Rangers',        match: /^(HUNT|TRAPPER|ANIMALCARE|ANIMALTRAIN|FISH)/ },
+    { name: 'Doctors',        match: /^(DIAGNOSE|SURGERY|SUTUR|BONE_SETT|DRESS_WOUND|FEED_WATER|RECOVER_WOUNDED)/ },
+    { name: 'Farmers',        match: /^(PLANT|HERBALI|MILK|CHEESE|COOK|BREW|PRESS|PROCESSPLANT|PROCESS_PLANT|SHEARER|SPINNER|BUTCHER|TANNER|DYER)/ },
+    { name: 'Fishery',        match: /^(FISH|DISSECT)/ },
+    { name: 'Metalsmiths',    match: /^(SMELT|FORGE|METAL|BLACKSMITH|FURNACE_OPERATOR)/ },
+    { name: 'Jewelers',       match: /^(CUT_GEM|ENCRUST|GEM)/ },
+    { name: 'Craftsdwarves',  match: /^(LEATHER|WEAVER|CLOTHES|EXTRACT|GLASS|POTTERY|GLAZER|WAX|SOAP|BONE_CARV|SIEGE_CRAFTS|CRAFT)/ },
+    { name: 'Engineers',      match: /^(MECHANIC|SIEGE_OP|SIEGE_ENG|ARCHITECT|PUMP|LEVER|HAUL_TRADE|TRADE)/ },
+    { name: 'Hauling',        match: /^HAUL/ },
+    { name: 'Other',          match: /.*/ },
+  ];
+  const out = tranches.map(t => ({ name: t.name, labors: [] }));
+  const used = new Set();
+  for (const [idStr, name] of Object.entries(laborMap)) {
+    const id = +idStr;
+    if (used.has(id)) continue;
+    for (let i = 0; i < tranches.length; i++) {
+      if (tranches[i].match.test(name)) {
+        out[i].labors.push(id);
+        used.add(id);
+        break;
+      }
+    }
+  }
+  return out.filter(t => t.labors.length > 0);
+}
+
+// ============================================================================
+// Filter / sort / group
+// ============================================================================
+
+function applyFilters(units) {
+  const q = state.filter.trim().toLowerCase();
+  let out = units;
+  if (q) {
+    out = out.filter(u =>
+      (u.name||'').toLowerCase().includes(q) ||
+      (u.profession||'').toLowerCase().includes(q) ||
+      (u.custom_profession||'').toLowerCase().includes(q) ||
+      (u.nickname||'').toLowerCase().includes(q)
+    );
+  }
+  if ($('show-pending-only')?.checked) {
+    const pendingIds = new Set([
+      ...state.pending.labors.map(p => p.unit_id),
+      ...state.pending.nicknames.map(p => p.unit_id),
+      ...state.pending.custom_profession.map(p => p.unit_id),
+    ]);
+    out = out.filter(u => pendingIds.has(u.id));
+  }
+  if (state.filtersOn.health.size) {
+    out = out.filter(u => {
+      for (const k of state.filtersOn.health) if ((u.health || {})[k] > 0) return true;
+      return false;
+    });
+  }
+  if (state.filtersOn.prefs.size) {
+    out = out.filter(u => (u.preferences || []).some(p => state.filtersOn.prefs.has(p)));
+  }
+  return out;
+}
+
+function applySort(units) {
+  const { col, dir } = state.sort;
+  const cmp = (a, b) => {
+    let av, bv;
+    if (col === 'name') { av = a.name; bv = b.name; }
+    else if (col === 'profession') { av = a.profession; bv = b.profession; }
+    else if (col === 'age') { av = a.age; bv = b.age; }
+    else if (col === 'happy') { av = STRESS_BUCKETS.indexOf(a.happiness); bv = STRESS_BUCKETS.indexOf(b.happiness); }
+    else if (col === 'job') { av = a.current_job; bv = b.current_job; }
+    else if (col === 'totlabors') { av = a.labors.filter(Boolean).length; bv = b.labors.filter(Boolean).length; }
+    else if (col.startsWith('skill:')) {
+      const id = +col.slice(6);
+      av = (a.skills.find(s => s.id === id) || {}).rating || 0;
+      bv = (b.skills.find(s => s.id === id) || {}).rating || 0;
+    } else if (col.startsWith('labor:')) {
+      const id = +col.slice(6);
+      const aon = a.labors[id] ? 1 : 0;
+      const bon = b.labors[id] ? 1 : 0;
+      if (aon !== bon) return (bon - aon) * dir;
+      // secondary: skill associated with the labor (rough; UI doesn't hard-map)
+      av = a.skills.length; bv = b.skills.length;
+    } else if (col.startsWith('attr:')) {
+      const [_, kind, idx] = col.split(':');
+      const arr = kind === 'p' ? 'phys_attrs' : 'ment_attrs';
+      av = (a[arr][idx] || {}).v || 0;
+      bv = (b[arr][idx] || {}).v || 0;
+    } else if (col.startsWith('role:')) {
+      const id = col.slice(5);
+      av = roleScore(a, id); bv = roleScore(b, id);
+    } else if (col === 'stress') {
+      av = a.stress ?? 0; bv = b.stress ?? 0;
+    } else { av = a.id; bv = b.id; }
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return -1 * dir;
+    if (av > bv) return  1 * dir;
+    return 0;
+  };
+  return [...units].sort(cmp);
+}
+
+function applyGroups(units) {
+  if (state.group === 'none') return [{ key: '', units }];
+  const fn = (GROUPS.find(g => g.id === state.group) || GROUPS[0]).fn;
+  const map = new Map();
+  for (const u of units) {
+    const k = fn(u) || '';
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(u);
+  }
+  const arr = [...map.entries()].map(([key, units]) => ({ key, units }));
+  arr.sort((a, b) => a.key.localeCompare(b.key));
+  return arr;
+}
+
+// ============================================================================
+// Roles
+// ============================================================================
+
+function roleScore(u, roleId) {
+  const role = state.roles.find(r => r.id === roleId);
+  if (!role) return 0;
+  // Skill component: average of (rating/15) over role.skills weighted.
+  let skillSum = 0, skillW = 0;
+  for (const s of role.skills || []) {
+    const id = skillIdByName(s.name);
+    if (id == null) continue;
+    const r = u.skills.find(x => x.id === id);
+    const v = (r ? Math.min(15, r.rating) : 0) / 15;
+    skillSum += v * s.weight; skillW += s.weight;
+  }
+  const skill = skillW > 0 ? skillSum / skillW : 0;
+  // Attribute component: average of physical + mental named attrs (value/max).
+  let attrSum = 0, attrN = 0;
+  for (const name of role.attrs?.phys || []) {
+    const idx = state.enums.attr_phys.indexOf(name);
+    if (idx >= 0 && u.phys_attrs[idx]) {
+      const m = u.phys_attrs[idx].max || 1;
+      attrSum += Math.min(1, (u.phys_attrs[idx].v || 0) / Math.max(1, m));
+      attrN++;
+    }
+  }
+  for (const name of role.attrs?.ment || []) {
+    const idx = state.enums.attr_ment.indexOf(name);
+    if (idx >= 0 && u.ment_attrs[idx]) {
+      const m = u.ment_attrs[idx].max || 1;
+      attrSum += Math.min(1, (u.ment_attrs[idx].v || 0) / Math.max(1, m));
+      attrN++;
+    }
+  }
+  const attr = attrN > 0 ? attrSum / attrN : 0;
+  return Math.round((skill * 0.7 + attr * 0.3) * 100);
+}
+
+function skillIdByName(name) {
+  for (const [id, n] of Object.entries(state.enums.skill)) if (n === name) return +id;
+  return null;
+}
+
+// ============================================================================
+// Pending changes
+// ============================================================================
+
+function findPendingLabor(unit_id, labor) {
+  return state.pending.labors.findIndex(p => p.unit_id === unit_id && p.labor === labor);
+}
+
+function queueLabor(unit_id, labor, enabled) {
+  const idx = findPendingLabor(unit_id, labor);
+  if (idx >= 0) state.pending.labors[idx].enabled = enabled;
+  else state.pending.labors.push({ unit_id, labor, enabled });
+  // If toggled back to original state, drop it.
+  const u = state.units.find(x => x.id === unit_id);
+  if (u && (u.labors[labor] === enabled)) {
+    if (idx >= 0) state.pending.labors.splice(idx, 1);
+  }
+  refreshPendingUI();
+}
+
+function queueNickname(unit_id, nickname) {
+  const idx = state.pending.nicknames.findIndex(p => p.unit_id === unit_id);
+  if (idx >= 0) state.pending.nicknames[idx].nickname = nickname;
+  else state.pending.nicknames.push({ unit_id, nickname });
+  const u = state.units.find(x => x.id === unit_id);
+  if (u && (u.nickname || '') === (nickname || '')) {
+    if (idx >= 0) state.pending.nicknames.splice(idx, 1);
+  }
+  refreshPendingUI();
+}
+
+function queueCustomProf(unit_id, name) {
+  const idx = state.pending.custom_profession.findIndex(p => p.unit_id === unit_id);
+  if (idx >= 0) state.pending.custom_profession[idx].name = name;
+  else state.pending.custom_profession.push({ unit_id, name });
+  const u = state.units.find(x => x.id === unit_id);
+  if (u && (u.custom_profession || '') === (name || '')) {
+    if (idx >= 0) state.pending.custom_profession.splice(idx, 1);
+  }
+  refreshPendingUI();
+}
+
+function pendingTotal() {
+  return state.pending.labors.length + state.pending.nicknames.length + state.pending.custom_profession.length;
+}
+
+function refreshPendingUI() {
+  const total = pendingTotal();
+  $('pending-count').textContent = total;
+  $('pending-count-2').textContent = total;
+  const ul = $('pending-list');
+  ul.innerHTML = '';
+  const nameOf = (id) => (state.units.find(u => u.id === id) || {}).name || ('#' + id);
+  for (const p of state.pending.labors) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="who">${esc(nameOf(p.unit_id))}</span><span class="what">${esc(state.enums.labor[p.labor] || ('lab '+p.labor))} ${p.enabled ? '✓' : '✗'}</span>`;
+    ul.appendChild(li);
+  }
+  for (const p of state.pending.nicknames) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="who">${esc(nameOf(p.unit_id))}</span><span class="what">nick "${esc(p.nickname)}"</span>`;
+    ul.appendChild(li);
+  }
+  for (const p of state.pending.custom_profession) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="who">${esc(nameOf(p.unit_id))}</span><span class="what">prof "${esc(p.name)}"</span>`;
+    ul.appendChild(li);
+  }
+}
+
+function clearPending() {
+  state.pending = { labors: [], nicknames: [], custom_profession: [] };
+  refreshPendingUI();
+  render();
+}
+
+async function commitPending() {
+  if (pendingTotal() === 0) return;
+  $('commit-btn').disabled = true;
+  statusMsg('Committing…');
+  try {
+    const r = await fetch('/play/dfhack/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state.pending),
+    });
+    if (!r.ok) { statusMsg('Commit failed: ' + (await r.text()), 'var(--bad)'); return; }
+    const res = await r.json();
+    statusMsg(`Committed ${res.applied} change(s)` + (res.errors?.length ? `, ${res.errors.length} error(s)` : ''));
+    clearPending();
+    await reload();
+  } catch (e) {
+    statusMsg('Commit error: ' + e.message, 'var(--bad)');
+  } finally {
+    $('commit-btn').disabled = false;
+  }
+}
+
+// ============================================================================
+// Optimizer (one preset: top-N per role)
+// ============================================================================
+
+function runOptimize() {
+  if (!state.loaded) return;
+  const N = parseInt(prompt('Optimize: assign each role\'s labors to the top-N dwarves by role score. N =', '3') || '0', 10);
+  if (!N || N <= 0) return;
+  // Map skill name → labor IDs (heuristic: same name root, e.g. MASONRY → MASON labor).
+  const laborByName = {};
+  for (const [id, name] of Object.entries(state.enums.labor)) laborByName[name] = +id;
+  const skillToLaborId = (skillName) => {
+    // Try exact, then prefix match.
+    if (laborByName[skillName] != null) return laborByName[skillName];
+    // crude name-mapping table for common skill→labor pairs
+    const map = {
+      MINING:'MINE', WOOD_CUTTING:'CUTWOOD', CARPENTRY:'CARPENTER', MASONRY:'MASON',
+      MECHANICS:'MECHANIC', DIAGNOSE:'DIAGNOSE', SURGERY:'SURGERY', SUTURING:'SUTURE',
+      SET_BONE:'BONE_SETTING', DRESS_WOUNDS:'DRESSING_WOUNDS', PLANT:'PLANT',
+      HERBALISM:'HERBALIST', BREWING:'BREWER', COOK:'COOK', SMELT:'SMELT',
+      FORGE_WEAPON:'WEAPONSMITH', FORGE_ARMOR:'ARMORSMITH', FORGE_FURNITURE:'BLACKSMITH',
+      METALCRAFT:'METAL_CRAFT', PROCESSPLANTS:'PROCESS_PLANT',
+    };
+    return laborByName[map[skillName]];
+  };
+  for (const role of state.roles) {
+    const ranked = state.units.map(u => ({ u, s: roleScore(u, role.id) }))
+      .sort((a, b) => b.s - a.s).slice(0, N);
+    const top = new Set(ranked.map(x => x.u.id));
+    const laborIds = (role.skills || []).map(s => skillToLaborId(s.name)).filter(x => x != null);
+    if (!laborIds.length) continue;
+    for (const u of state.units) {
+      const enable = top.has(u.id);
+      for (const lid of laborIds) {
+        if (u.labors[lid] !== enable) queueLabor(u.id, lid, enable);
+      }
+    }
+  }
+  render();
+  statusMsg(`Optimizer staged ${pendingTotal()} change(s) — review and Commit when ready.`);
+}
+
+// ============================================================================
+// Custom professions (browser-side; applied as labor sets)
+// ============================================================================
+
+function refreshCustomProfList() {
+  const div = $('custom-list');
+  div.innerHTML = '';
+  if (!state.customProfessions.length) {
+    div.innerHTML = '<em style="color:var(--fg-dim);font-size:10px;">none yet</em>';
+    return;
+  }
+  for (const cp of state.customProfessions) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="grow" style="color:var(--fg)">${esc(cp.name)}</span>
+      <button class="btn-sm" data-act="apply">apply</button>
+      <button class="btn-sm" data-act="del" style="color:var(--bad);border-color:var(--bad)">×</button>`;
+    row.querySelector('[data-act="apply"]').onclick = () => applyCustomProf(cp);
+    row.querySelector('[data-act="del"]').onclick = () => {
+      state.customProfessions = state.customProfessions.filter(x => x !== cp);
+      saveUI(); refreshCustomProfList();
+    };
+    div.appendChild(row);
+  }
+}
+
+function saveCustomFromSelection() {
+  const u = state.units.find(x => x.id === state.selectedUnitId);
+  if (!u) { alert('Select a dwarf row first.'); return; }
+  const name = $('custom-name').value.trim();
+  if (!name) { alert('Enter a name.'); return; }
+  const labors = [];
+  for (let i = 0; i < u.labors.length; i++) if (u.labors[i]) labors.push(i);
+  state.customProfessions.push({ name, labors });
+  $('custom-name').value = '';
+  saveUI(); refreshCustomProfList();
+}
+
+function applyCustomProf(cp) {
+  if (!state.selectedUnitId) { alert('Select a dwarf row first.'); return; }
+  const u = state.units.find(x => x.id === state.selectedUnitId);
+  if (!u) return;
+  const want = new Set(cp.labors);
+  for (let i = 0; i < u.labors.length; i++) {
+    const desired = want.has(i);
+    if (u.labors[i] !== desired) queueLabor(u.id, i, desired);
+  }
+  queueCustomProf(u.id, cp.name);
+  render();
+}
+
+// ============================================================================
+// Filters: prefs + health
+// ============================================================================
+
+function rebuildPrefsFilter() {
+  const counts = new Map();
+  for (const u of state.units) for (const p of u.preferences || []) counts.set(p, (counts.get(p) || 0) + 1);
+  const arr = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60);
+  const div = $('prefs-list');
+  div.innerHTML = '';
+  for (const [k, n] of arr) {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.filtersOn.prefs.has(k);
+    cb.onchange = () => { cb.checked ? state.filtersOn.prefs.add(k) : state.filtersOn.prefs.delete(k); render(); };
+    lbl.appendChild(cb);
+    const txt = document.createElement('span');
+    txt.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;';
+    txt.textContent = `${k} (${n})`;
+    lbl.appendChild(txt);
+    div.appendChild(lbl);
+  }
+  if (!arr.length) div.innerHTML = '<em style="color:var(--fg-dim)">no preferences exposed</em>';
+}
+
+function rebuildHealthFilter() {
+  const KIND = ['wounds','missing_limbs','hunger','thirst','tired','paralysis','unconscious','pain'];
+  const div = $('health-filter-list');
+  div.innerHTML = '';
+  for (const k of KIND) {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.filtersOn.health.has(k);
+    cb.onchange = () => { cb.checked ? state.filtersOn.health.add(k) : state.filtersOn.health.delete(k); render(); };
+    lbl.appendChild(cb);
+    const sp = document.createElement('span');
+    sp.textContent = k;
+    lbl.appendChild(sp);
+    div.appendChild(lbl);
+  }
+}
+
+function rebuildLegend() {
+  const div = $('legend-body');
+  div.innerHTML = '';
+  for (let i = 0; i <= 15; i++) {
+    const row = document.createElement('div');
+    const cls = SKILL_LEVELS[Math.min(i, 15)].cls;
+    row.innerHTML = `<span class="dt-cell ${cls}" style="display:inline-block;min-width:18px;text-align:center;">${i}</span> ${SKILL_LEVELS[Math.min(i, 15)].name}`;
+    row.style.cssText = 'display:flex;gap:0.4rem;font-size:10px;align-items:center;margin:0.05rem 0;';
+    div.appendChild(row);
+  }
+}
+
+// ============================================================================
+// View tabs / sort selector
+// ============================================================================
+
+function renderViewTabs() {
+  const nav = $('view-tabs');
+  nav.innerHTML = '';
+  for (const v of VIEWS) {
+    const span = document.createElement('span');
+    span.className = 'view-tab' + (state.view === v.id ? ' active' : '');
+    span.textContent = v.label;
+    span.onclick = async () => {
+      state.view = v.id; saveUI();
+      if (v.id === 'animals' && state.animals.length === 0) await loadAnimals();
+      renderViewTabs(); rebuildSortOptions(); render();
+    };
+    nav.appendChild(span);
+  }
+}
+
+function rebuildSortOptions() {
+  const sel = $('sort-sel');
+  const opts = [
+    ['name', 'Name'],
+    ['profession', 'Profession'],
+    ['age', 'Age'],
+    ['happy', 'Happiness'],
+    ['stress', 'Stress (raw)'],
+    ['job', 'Current job'],
+    ['totlabors', 'Total labors'],
+  ];
+  sel.innerHTML = '';
+  for (const [v, l] of opts) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = l;
+    sel.appendChild(o);
+  }
+  sel.value = (opts.some(o => o[0] === state.sort.col)) ? state.sort.col : 'name';
+}
+
+function rebuildGroupOptions() {
+  const sel = $('group-sel');
+  sel.innerHTML = '';
+  for (const g of GROUPS) {
+    const o = document.createElement('option');
+    o.value = g.id; o.textContent = g.label;
+    if (state.group === g.id) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+function onGroupChange() { state.group = $('group-sel').value; saveUI(); render(); }
+function onSortChange()  { state.sort = { col: $('sort-sel').value, dir: 1 }; saveUI(); render(); }
+function onFilterChange(){ state.filter = $('filter').value; saveUI(); render(); }
+function onAutoRefresh() {
+  state.ui.autoRefresh = $('auto-refresh').checked;
+  if (state.ui.autoRefresh) {
+    state._timer = setInterval(reload, 8000);
+  } else {
+    clearInterval(state._timer);
+  }
+}
+
+// ============================================================================
+// Render
+// ============================================================================
+
+function render() {
+  if (!state.loaded) return;
+  rebuildGroupOptions();
+  let units = applyFilters(state.units);
+  units = applySort(units);
+  const groups = applyGroups(units);
+  const totalShown = groups.reduce((a, g) => a + g.units.length, 0);
+  $('grid-counts').textContent = `${totalShown} / ${state.units.length} citizens`;
+  $('pop-summary').textContent = `${state.units.length} citizens · ${pendingTotal()} pending`;
+
+  const grid = $('grid');
+  grid.innerHTML = '';
+  if (state.view === 'animals') return renderAnimals(grid);
+
+  // Header
+  const cols = currentColumns();
+  const thead = document.createElement('thead');
+  // Tranche row (only meaningful for labors view)
+  if (state.view === 'labors') {
+    const trT = document.createElement('tr');
+    trT.className = 'tranches';
+    trT.innerHTML = `<th class="col-name">Dwarf</th><th class="col-misc"></th><th class="col-misc"></th>`;
+    for (const tr of state.laborTranches) {
+      const th = document.createElement('th');
+      th.colSpan = tr.labors.length;
+      th.className = 'tranche';
+      th.textContent = tr.name;
+      trT.appendChild(th);
+    }
+    thead.appendChild(trT);
+  }
+  // Column row
+  const trC = document.createElement('tr');
+  trC.className = 'cols';
+  for (const c of cols) {
+    const th = document.createElement('th');
+    th.className = c.class || '';
+    if (state.sort.col === c.id) th.classList.add('sorted');
+    if (state.sort.col === c.id && state.sort.dir < 0) th.classList.add('desc');
+    th.textContent = c.label;
+    if (c.title) th.title = c.title;
+    th.onclick = () => {
+      if (state.sort.col === c.id) state.sort.dir = -state.sort.dir;
+      else state.sort = { col: c.id, dir: 1 };
+      saveUI(); render();
+    };
+    trC.appendChild(th);
+  }
+  thead.appendChild(trC);
+  grid.appendChild(thead);
+
+  // Body
+  const tbody = document.createElement('tbody');
+  for (const g of groups) {
+    if (state.group !== 'none') {
+      const tr = document.createElement('tr');
+      tr.className = 'group' + (state.collapsedGroups.has(g.key) ? ' collapsed' : '');
+      const td = document.createElement('td');
+      td.colSpan = cols.length;
+      td.textContent = `${g.key || '(none)'}  ·  ${g.units.length}`;
+      td.onclick = () => {
+        if (state.collapsedGroups.has(g.key)) state.collapsedGroups.delete(g.key);
+        else state.collapsedGroups.add(g.key);
+        saveUI(); render();
+      };
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      if (state.collapsedGroups.has(g.key)) continue;
+    }
+    for (const u of g.units) tbody.appendChild(renderUnitRow(u, cols));
+  }
+  grid.appendChild(tbody);
+}
+
+function currentColumns() {
+  const fixed = [
+    { id: 'name', label: 'Dwarf', class: 'col-name' },
+    { id: 'profession', label: 'Profession', class: 'col-misc' },
+    { id: 'job', label: 'Job', class: 'col-misc' },
+  ];
+  switch (state.view) {
+    case 'overview': return [
+      ...fixed,
+      { id: 'age', label: 'Age', class: 'col-misc' },
+      { id: 'happy', label: 'Happy', class: 'col-misc' },
+      { id: 'totlabors', label: 'Labors', class: 'col-misc' },
+      { id: 'topskill', label: 'Top Skill', class: 'col-misc' },
+    ];
+    case 'labors': {
+      const out = [...fixed];
+      out[0].class = 'col-name first-data';
+      let firstData = true;
+      for (const tr of state.laborTranches) {
+        for (const lid of tr.labors) {
+          out.push({
+            id: 'labor:' + lid, label: shortLabor(state.enums.labor[lid] || ('?' + lid)),
+            class: firstData ? 'first-data' : '',
+            title: state.enums.labor[lid],
+          });
+          firstData = false;
+        }
+      }
+      return out;
+    }
+    case 'skills': {
+      const out = [...fixed];
+      const skillIds = Object.keys(state.enums.skill).map(Number).sort((a, b) => a - b);
+      for (const id of skillIds) {
+        out.push({ id: 'skill:' + id, label: shortSkill(state.enums.skill[id]), title: state.enums.skill[id] });
+      }
+      return out;
+    }
+    case 'attrs': {
+      const out = [...fixed];
+      state.enums.attr_phys.forEach((n, i) => out.push({ id: 'attr:p:' + i, label: shortAttr(n), title: 'PHYS · ' + n }));
+      state.enums.attr_ment.forEach((n, i) => out.push({ id: 'attr:m:' + i, label: shortAttr(n), title: 'MENT · ' + n }));
+      return out;
+    }
+    case 'roles':   return [...fixed, ...state.roles.map(r => ({ id: 'role:' + r.id, label: r.id }))];
+    case 'social':  return [...fixed, ...Object.entries(state.enums.trait).map(([id, n]) => ({ id: 'trait:' + id, label: shortAttr(n), title: n }))];
+    case 'military':return [...fixed,
+      ...['MELEE_COMBAT','AXE','SWORD','MACE','HAMMER','SPEAR','FIGHTER','ARMOR','SHIELD','DODGING','MARKSMAN_DWARF','CROSSBOW']
+         .map(name => ({ id: 'skill:' + (skillIdByName(name) ?? -1), label: shortSkill(name), title: name }))
+         .filter(c => +c.id.split(':')[1] >= 0)];
+    case 'health':  return [...fixed,
+      { id: 'h:wounds',        label: 'Wnd' },
+      { id: 'h:missing_limbs', label: 'Miss' },
+      { id: 'h:hunger',        label: 'Hngr' },
+      { id: 'h:thirst',        label: 'Thst' },
+      { id: 'h:tired',         label: 'Tird' },
+      { id: 'h:paralysis',     label: 'Para' },
+      { id: 'h:pain',          label: 'Pain' },
+    ];
+    default: return fixed;
+  }
+}
+
+function renderUnitRow(u, cols) {
+  const tr = document.createElement('tr');
+  tr.className = 'unit' + (state.selectedUnitId === u.id ? ' selected' : '') + (u.legendary ? ' legendary' : '');
+  for (const c of cols) {
+    const td = document.createElement('td');
+    td.className = c.class || '';
+    if (c.id === 'name') {
+      td.classList.add('col-name');
+      td.textContent = u.name + (u.custom_profession ? ` [${u.custom_profession}]` : '');
+      td.onclick = () => { state.selectedUnitId = u.id; renderDetailDock(); render(); };
+    } else if (c.id === 'profession') {
+      td.style.textAlign = 'left';
+      td.textContent = u.profession || '';
+    } else if (c.id === 'job') {
+      td.style.textAlign = 'left';
+      td.textContent = u.current_job || '';
+    } else if (c.id === 'age') td.textContent = u.age || '';
+    else if (c.id === 'happy') {
+      td.classList.add('happy', 'h-' + (u.happiness || 'Unknown'));
+      td.textContent = (u.happiness || '?').slice(0, 4);
+      td.title = u.happiness + ' (stress ' + (u.stress ?? '?') + ')';
+    } else if (c.id === 'totlabors') {
+      td.textContent = u.labors.filter(Boolean).length;
+    } else if (c.id === 'topskill') {
+      const top = (u.skills || []).reduce((a, b) => (a.rating > b.rating ? a : b), { rating: -1 });
+      if (top.rating >= 0) {
+        td.style.textAlign = 'left';
+        td.textContent = (state.enums.skill[top.id] || ('#' + top.id)) + ' ' + top.rating;
+      }
+    } else if (c.id.startsWith('labor:')) {
+      const lid = +c.id.slice(6);
+      const pendingIdx = findPendingLabor(u.id, lid);
+      const pendingState = pendingIdx >= 0 ? state.pending.labors[pendingIdx].enabled : null;
+      const on = pendingState ?? u.labors[lid];
+      td.classList.add('lab-cell', on ? 'lab-on' : 'lab-off');
+      if (pendingState != null) td.classList.add('pending');
+      const r = u.skills.find(s => s.id === skillIdForLabor(lid));
+      td.textContent = on ? (r && r.rating > 0 ? r.rating : '✓') : '';
+      td.title = state.enums.labor[lid];
+      td.onclick = (e) => { e.stopPropagation(); queueLabor(u.id, lid, !on); render(); };
+    } else if (c.id.startsWith('skill:')) {
+      const sid = +c.id.slice(6);
+      const r = u.skills.find(s => s.id === sid);
+      const lvl = r ? r.rating : 0;
+      td.className += ' ' + SKILL_LEVELS[Math.min(lvl, 15)].cls;
+      if (r) {
+        td.textContent = lvl;
+        td.title = `${state.enums.skill[sid]} · ${SKILL_LEVELS[Math.min(lvl, 15)].name} · xp ${r.xp}` + (r.rust ? ' · rust ' + r.rust : '');
+      }
+    } else if (c.id.startsWith('attr:')) {
+      const [_, kind, idx] = c.id.split(':');
+      const a = (kind === 'p' ? u.phys_attrs : u.ment_attrs)[+idx];
+      if (a) {
+        td.classList.add('attr');
+        const tier = attrTier(a);
+        if (tier) td.classList.add('tier-' + tier);
+        td.textContent = a.v;
+        td.title = `${a.v} / ${a.max}`;
+      }
+    } else if (c.id.startsWith('role:')) {
+      const id = c.id.slice(5);
+      const score = roleScore(u, id);
+      const bucket = score >= 80 ? 100 : score >= 60 ? 80 : score >= 40 ? 60 : score >= 20 ? 40 : score >= 1 ? 20 : 0;
+      td.classList.add('role', 'r-' + bucket);
+      td.textContent = score;
+    } else if (c.id.startsWith('trait:')) {
+      const tid = +c.id.slice(6);
+      const t = (u.traits || []).find(x => x.id === tid);
+      if (t) {
+        td.textContent = t.v;
+        td.classList.add('attr');
+        const tier = t.v >= 90 ? 'pos2' : t.v >= 70 ? 'pos1' : t.v <= 10 ? 'neg2' : t.v <= 30 ? 'neg1' : '';
+        if (tier) td.classList.add('tier-' + tier);
+      }
+    } else if (c.id.startsWith('h:')) {
+      const k = c.id.slice(2);
+      const v = (u.health || {})[k] || 0;
+      if (v > 0) { td.textContent = v; td.style.color = 'var(--bad)'; }
+    }
+    tr.appendChild(td);
+  }
+  return tr;
+}
+
+function skillIdForLabor(lid) {
+  // Heuristic: many DF labors share a name with their primary skill (CARPENTER → CARPENTRY).
+  // We try a few simple suffix swaps; if no match, return -1 so the cell falls back to ✓.
+  const lname = state.enums.labor[lid] || '';
+  const candidates = [lname, lname + 'Y', lname.replace(/E?R$/, 'Y'), lname.replace(/_(SMITH|CRAFT|MAKING)$/, ''),
+                      lname.replace(/^FORGE_/, ''), lname.replace(/ING$/, '')];
+  for (const c of candidates) {
+    const id = skillIdByName(c);
+    if (id != null) return id;
+  }
+  return -1;
+}
+
+function attrTier(a) {
+  // Distance from median (max/2) gives a coarse positive/negative tier.
+  const median = (a.max || 1000) / 2;
+  const d = (a.v || 0) - median;
+  const step = (a.max || 1000) / 8;
+  if (d >= step * 2) return 'pos2';
+  if (d >= step)     return 'pos1';
+  if (d <= -step * 2) return 'neg2';
+  if (d <= -step)     return 'neg1';
+  return '';
+}
+
+function shortLabor(name) { return (name || '').replace(/_/g, ' ').slice(0, 4); }
+function shortSkill(name) { return (name || '').replace(/_/g, ' ').slice(0, 4); }
+function shortAttr(name)  { return (name || '').slice(0, 3); }
+
+function renderAnimals(grid) {
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr class="cols"><th class="col-name">Animal</th><th>Race</th><th>Caste</th><th>Age</th><th>Training</th><th>Caged</th><th>Slaughter</th></tr>`;
+  grid.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const a of state.animals) {
+    const tr = document.createElement('tr');
+    tr.className = 'unit';
+    tr.innerHTML = `<td class="col-name">${esc(a.name)}</td><td>${esc(a.race)}</td><td>${esc(a.caste)}</td><td>${esc(a.age_tier)}</td><td>${esc(a.training)}</td><td>${a.caged?'✓':''}</td><td>${a.marked_for_slaughter?'✓':''}</td>`;
+    tbody.appendChild(tr);
+  }
+  grid.appendChild(tbody);
+  $('grid-counts').textContent = `${state.animals.length} animals`;
+}
+
+// ============================================================================
+// Detail dock
+// ============================================================================
+
+function renderDetailDock() {
+  const u = state.units.find(x => x.id === state.selectedUnitId);
+  const body = $('dock-details-body');
+  if (!u) { body.innerHTML = '<em style="color:var(--fg-dim)">Click a row to inspect.</em>'; return; }
+
+  const topSkills = [...u.skills].sort((a, b) => (b.rating - a.rating) || (b.xp - a.xp)).slice(0, 8);
+  const topRoles = state.roles.map(r => ({ id: r.id, score: roleScore(u, r.id) })).sort((a, b) => b.score - a.score).slice(0, 10);
+  const topTraits = (u.traits || []).slice().sort((a, b) => Math.abs(b.v - 50) - Math.abs(a.v - 50)).slice(0, 6);
+  const unmetNeeds = (u.needs || []).filter(n => n.focus < 0).slice(0, 5);
+
+  body.innerHTML = `
+    <div class="detail-name">${esc(u.name)}</div>
+    <div class="detail-meta">${esc(u.profession || '')} · ${u.age} yrs · ${esc(u.caste)}</div>
+    <div class="detail-section">
+      <h4>Identity</h4>
+      <div class="row"><label style="width:55px">Nick</label><input type="text" class="nick-input" id="nick-${u.id}" value="${esc(u.nickname || '')}"></div>
+      <div class="row"><label style="width:55px">Custom</label><input type="text" class="nick-input" id="prof-${u.id}" value="${esc(u.custom_profession || '')}"></div>
+      <div class="row"><span style="color:var(--fg-dim);font-size:10px">Stress ${u.stress ?? '?'} · ${esc(u.happiness)}</span></div>
+    </div>
+    <div class="detail-section"><h4>Top Skills</h4>
+      <div class="detail-list">${topSkills.map(s => `<div class="kv"><span class="k">${esc(state.enums.skill[s.id]||('#'+s.id))}</span><span class="v">${s.rating} · xp ${s.xp}</span></div>`).join('')}</div>
+    </div>
+    <div class="detail-section"><h4>Attributes</h4>
+      <div class="detail-list">${
+        state.enums.attr_phys.map((n, i) => {
+          const a = u.phys_attrs[i] || {}; return `<div class="kv"><span class="k">${esc(n)}</span><span class="v">${a.v ?? '?'} / ${a.max ?? '?'}</span></div>`;
+        }).join('') +
+        state.enums.attr_ment.map((n, i) => {
+          const a = u.ment_attrs[i] || {}; return `<div class="kv"><span class="k">${esc(n)}</span><span class="v">${a.v ?? '?'} / ${a.max ?? '?'}</span></div>`;
+        }).join('')
+      }</div>
+    </div>
+    <div class="detail-section"><h4>Top Roles</h4>
+      <div class="detail-list">${topRoles.map(r => `<div class="kv"><span class="k">${esc(r.id)}</span><span class="v">${r.score}</span></div>`).join('')}</div>
+    </div>
+    <div class="detail-section"><h4>Notable Traits</h4>
+      <div class="detail-list">${topTraits.map(t => `<div class="kv"><span class="k">${esc(state.enums.trait[t.id]||('#'+t.id))}</span><span class="v">${t.v}</span></div>`).join('')}</div>
+    </div>
+    ${unmetNeeds.length ? `
+      <div class="detail-section"><h4>Unmet Needs</h4>
+        <div class="detail-list">${unmetNeeds.map(n => `<div class="kv"><span class="k">${esc(state.enums.need[n.id]||('#'+n.id))}</span><span class="v">${n.focus}</span></div>`).join('')}</div>
+      </div>` : ''}
+    <div class="detail-section"><h4>Health</h4>
+      <div class="detail-list">${Object.entries(u.health||{}).map(([k,v])=>`<div class="kv"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`).join('')}</div>
+    </div>
+  `;
+
+  $('nick-' + u.id).addEventListener('change', (e) => queueNickname(u.id, e.target.value));
+  $('prof-' + u.id).addEventListener('change', (e) => queueCustomProf(u.id, e.target.value));
+}
+
+// ============================================================================
+// Docks toggle
+// ============================================================================
+
+function toggleDock(name) {
+  const el = $('dock-' + name);
+  el.classList.toggle('collapsed');
+  state.ui.docks[name] = el.classList.contains('collapsed');
+  saveUI();
+}
+
+function applyDockState() {
+  for (const [k, collapsed] of Object.entries(state.ui.docks || {})) {
+    const el = $('dock-' + k);
+    if (el && collapsed) el.classList.add('collapsed');
+  }
+}
+
+// ============================================================================
+// CSV export
+// ============================================================================
+
+function exportCSV() {
+  const cols = currentColumns();
+  const rows = [['name', ...cols.filter(c => c.id !== 'name').map(c => c.label)]];
+  let units = applyFilters(state.units);
+  units = applySort(units);
+  for (const u of units) {
+    const r = [u.name];
+    for (const c of cols) {
+      if (c.id === 'name') continue;
+      const td = renderUnitRow(u, [c]).querySelector('td:last-child');
+      r.push(td ? (td.textContent || '') : '');
+    }
+    rows.push(r);
+  }
+  const csv = rows.map(r => r.map(s => `"${String(s).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `therapist-${state.view}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================================
+// Hotkeys
+// ============================================================================
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); reload(); }
+  else if (e.ctrlKey && e.key.toLowerCase() === 't') { e.preventDefault(); commitPending(); }
+  else if (e.ctrlKey && e.key.toLowerCase() === 'e') { e.preventDefault(); clearPending(); }
+});
+
+// ============================================================================
+// Init
+// ============================================================================
+
+loadUI();
+applyDockState();
+renderViewTabs();
+rebuildGroupOptions();
+rebuildSortOptions();
+$('filter').value = state.filter;
+refreshCustomProfList();
+refreshPendingUI();
+reload();
+</script>
+
+</body>
+</html>

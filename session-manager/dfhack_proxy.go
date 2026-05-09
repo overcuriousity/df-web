@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -67,6 +68,92 @@ func (m *Manager) handleDFHackUnits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The script emits valid JSON; pass it straight through.
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, out)
+}
+
+// handleDFHackUnitsFull calls web-units-full and proxies its JSON output.
+// This is the rich payload powering /therapist (enums + roles + per-unit
+// skills/attrs/labors/traits/needs/health/squad).
+func (m *Manager) handleDFHackUnitsFull(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	_, ok := m.containers[uid]
+	m.mu.Unlock()
+	if !ok {
+		http.Error(w, "no active session", http.StatusNotFound)
+		return
+	}
+
+	out, err := dfhackRun(uid, "web-units-full")
+	if err != nil {
+		http.Error(w, "dfhack unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, out)
+}
+
+// handleDFHackAnimals calls web-animals and proxies its JSON output.
+func (m *Manager) handleDFHackAnimals(w http.ResponseWriter, r *http.Request) {
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	_, ok := m.containers[uid]
+	m.mu.Unlock()
+	if !ok {
+		http.Error(w, "no active session", http.StatusNotFound)
+		return
+	}
+
+	out, err := dfhackRun(uid, "web-animals")
+	if err != nil {
+		http.Error(w, "dfhack unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, out)
+}
+
+// handleDFHackCommit forwards the request body (JSON) to web-commit.lua as a
+// single positional argument. The Lua script returns {"applied": N, "errors": [...]}.
+//
+// Body is bounded at 1 MiB — far above any realistic batch (a thousand cell
+// toggles is well under 100 KB).
+func (m *Manager) handleDFHackCommit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	uid := uidFromContext(r.Context())
+
+	m.mu.Lock()
+	_, ok := m.containers[uid]
+	m.mu.Unlock()
+	if !ok {
+		http.Error(w, "no active session", http.StatusNotFound)
+		return
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "request body too large", http.StatusBadRequest)
+		return
+	}
+	// Validate JSON shape before invoking DFHack so we fail fast on garbage
+	// rather than spending an exec round-trip.
+	var probe any
+	if err := json.Unmarshal(body, &probe); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	out, err := dfhackRun(uid, "web-commit", string(body))
+	if err != nil {
+		http.Error(w, "dfhack error: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, out)
 }
