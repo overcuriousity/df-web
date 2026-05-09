@@ -110,8 +110,13 @@
   table.dt th.col-misc { min-width: 70px; }
   table.dt th.first-data { border-left: 2px solid var(--accent); }
   table.dt thead th { position: sticky; top: 0; z-index: 3; }
-  table.dt thead tr.tranches th { top: 0; }
-  table.dt thead tr.cols th { top: 22px; }
+  /* When a tranche row is present (Labors view), the cols row sits below it. */
+  table.dt.has-tranches thead tr.tranches th { top: 0; }
+  table.dt.has-tranches thead tr.cols th { top: 22px; }
+  /* On all other views the cols row IS the first sticky row, so anchor it at 0
+     — otherwise the first body row scrolls under a 22px gap and looks like a
+     missing group header. */
+  table.dt:not(.has-tranches) thead tr.cols th { top: 0; }
   table.dt th.col-name, table.dt td.col-name { position: sticky; left: 0; z-index: 2; background: var(--bg); text-align: left; padding-left: 6px; }
   table.dt thead th.col-name { z-index: 4; background: var(--bg-2); }
   table.dt tr.group td {
@@ -210,17 +215,19 @@
     <div class="dock" id="dock-custom">
       <h3 onclick="toggleDock('custom')">Custom Professions</h3>
       <div class="dock-body">
+        <div style="font-size:10px;color:var(--fg-dim);margin-bottom:0.3rem;line-height:1.35;">
+          A <em>custom profession</em> is a snapshot of one dwarf's currently-enabled labors.
+          Select a dwarf (click a row in the grid), give the snapshot a name, and click
+          <em>Save from selected</em>. To use it, select a different dwarf and press
+          <em>apply</em> next to the saved entry — it queues labor toggles to match the snapshot
+          plus a profession-name change. Nothing is sent to DF until you press
+          <em>Commit</em> in the toolbar. Stored only in this browser.
+        </div>
         <div class="row">
-          <input type="text" id="custom-name" placeholder="name…" class="grow">
+          <input type="text" id="custom-name" placeholder="snapshot name…" class="grow">
           <button class="btn-sm" onclick="saveCustomFromSelection()">Save from selected</button>
         </div>
         <div id="custom-list" style="margin-top:0.4rem;"></div>
-      </div>
-    </div>
-    <div class="dock" id="dock-views">
-      <h3 onclick="toggleDock('views')">Grid Views</h3>
-      <div class="dock-body" style="font-size:10px;color:var(--fg-dim);">
-        Built-in views switch via the tabs above. Custom view persistence is local to this browser.
       </div>
     </div>
   </aside>
@@ -563,9 +570,14 @@ function roleScore(u, roleId) {
   const role = state.roles.find(r => r.id === roleId);
   if (!role) return 0;
   // Skill component: average of (rating/15) over role.skills weighted.
+  // Each entry is either {name, weight} (legacy) or {names: [...], weight}; we
+  // try every candidate so DF version drift (WOOD_CUTTING vs AXE, SMELT vs
+  // FURNACE_OPERATOR, …) doesn't silently zero a role.
   let skillSum = 0, skillW = 0;
   for (const s of role.skills || []) {
-    const id = skillIdByName(s.name);
+    const candidates = s.names || (s.name ? [s.name] : []);
+    let id = null;
+    for (const n of candidates) { const v = skillIdByName(n); if (v != null) { id = v; break; } }
     if (id == null) continue;
     const r = u.skills.find(x => x.id === id);
     const v = (r ? Math.min(15, r.rating) : 0) / 15;
@@ -925,6 +937,7 @@ function render() {
 
   const grid = $('grid');
   grid.innerHTML = '';
+  grid.classList.toggle('has-tranches', state.view === 'labors');
   if (state.view === 'animals') return renderAnimals(grid);
 
   // Header

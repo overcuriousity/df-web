@@ -84,42 +84,44 @@ local function roles()
     return {
         {
             id = 'Miner',
-            skills = { { name = 'MINING', weight = 1.0 } },
+            skills = { { names = { 'MINING' }, weight = 1.0 } },
             attrs  = { phys = { 'STRENGTH', 'TOUGHNESS', 'ENDURANCE' }, ment = { 'SPATIAL_SENSE' } },
             traits = {},
         },
         {
             id = 'Woodcutter',
-            skills = { { name = 'WOOD_CUTTING', weight = 1.0 } },
+            -- DF 53.x emits the chopping skill as either WOOD_CUTTING or AXE
+            -- (axe-as-tool); some forks use WOODCUTTING. Try all three.
+            skills = { { names = { 'WOOD_CUTTING', 'WOODCUTTING', 'AXE' }, weight = 1.0 } },
             attrs  = { phys = { 'STRENGTH', 'AGILITY' }, ment = { } },
             traits = {},
         },
         {
             id = 'Carpenter',
-            skills = { { name = 'CARPENTRY', weight = 1.0 } },
+            skills = { { names = { 'CARPENTRY' }, weight = 1.0 } },
             attrs  = { phys = { 'STRENGTH', 'AGILITY' }, ment = { 'CREATIVITY', 'SPATIAL_SENSE' } },
             traits = {},
         },
         {
             id = 'Mason',
-            skills = { { name = 'MASONRY', weight = 1.0 } },
+            skills = { { names = { 'MASONRY' }, weight = 1.0 } },
             attrs  = { phys = { 'STRENGTH', 'AGILITY' }, ment = { 'CREATIVITY', 'SPATIAL_SENSE' } },
             traits = {},
         },
         {
             id = 'Mechanic',
-            skills = { { name = 'MECHANICS', weight = 1.0 } },
+            skills = { { names = { 'MECHANICS', 'MECHANIC' }, weight = 1.0 } },
             attrs  = { phys = { 'AGILITY' }, ment = { 'ANALYTICAL_ABILITY', 'SPATIAL_SENSE', 'KINESTHETIC_SENSE' } },
             traits = {},
         },
         {
             id = 'Doctor',
             skills = {
-                { name = 'DIAGNOSE', weight = 1.0 },
-                { name = 'SURGERY',  weight = 0.8 },
-                { name = 'SUTURING', weight = 0.6 },
-                { name = 'SET_BONE', weight = 0.6 },
-                { name = 'DRESS_WOUNDS', weight = 0.5 },
+                { names = { 'DIAGNOSE' }, weight = 1.0 },
+                { names = { 'SURGERY' },  weight = 0.8 },
+                { names = { 'SUTURING' }, weight = 0.6 },
+                { names = { 'SET_BONE', 'BONE_SETTING' }, weight = 0.6 },
+                { names = { 'DRESS_WOUNDS', 'DRESSING_WOUNDS' }, weight = 0.5 },
             },
             attrs  = { phys = { 'AGILITY' }, ment = { 'ANALYTICAL_ABILITY', 'EMPATHY', 'KINESTHETIC_SENSE' } },
             traits = {},
@@ -127,38 +129,40 @@ local function roles()
         {
             id = 'Farmer',
             skills = {
-                { name = 'PLANT',   weight = 1.0 },
-                { name = 'HERBALISM', weight = 0.5 },
-                { name = 'PROCESSPLANTS', weight = 0.5 },
+                { names = { 'PLANT', 'PLANT_GATHERING', 'GROWER' }, weight = 1.0 },
+                { names = { 'HERBALISM' },                          weight = 0.5 },
+                { names = { 'PROCESSPLANTS', 'PROCESS_PLANT' },     weight = 0.5 },
             },
             attrs  = { phys = { 'TOUGHNESS', 'ENDURANCE' }, ment = { 'PATIENCE' } },
             traits = {},
         },
         {
             id = 'Brewer',
-            skills = { { name = 'BREWING', weight = 1.0 } },
+            skills = { { names = { 'BREWING' }, weight = 1.0 } },
             attrs  = { phys = { 'AGILITY' }, ment = { 'ANALYTICAL_ABILITY', 'CREATIVITY' } },
             traits = {},
         },
         {
             id = 'Cook',
-            skills = { { name = 'COOK', weight = 1.0 } },
+            skills = { { names = { 'COOK', 'COOKING' }, weight = 1.0 } },
             attrs  = { phys = { 'AGILITY' }, ment = { 'CREATIVITY', 'KINESTHETIC_SENSE' } },
             traits = {},
         },
         {
             id = 'Smelter',
-            skills = { { name = 'SMELT', weight = 1.0 } },
+            -- DF historically: SMELT. DF 50+/53.x sometimes exposes the smelter
+            -- skill as FURNACE_OPERATOR. Accept either.
+            skills = { { names = { 'SMELT', 'FURNACE_OPERATOR' }, weight = 1.0 } },
             attrs  = { phys = { 'STRENGTH', 'TOUGHNESS', 'ENDURANCE' }, ment = { } },
             traits = {},
         },
         {
             id = 'Smith',
             skills = {
-                { name = 'FORGE_WEAPON', weight = 1.0 },
-                { name = 'FORGE_ARMOR',  weight = 1.0 },
-                { name = 'FORGE_FURNITURE', weight = 0.7 },
-                { name = 'METALCRAFT',   weight = 0.5 },
+                { names = { 'FORGE_WEAPON', 'WEAPONSMITH' },        weight = 1.0 },
+                { names = { 'FORGE_ARMOR',  'ARMORSMITH' },         weight = 1.0 },
+                { names = { 'FORGE_FURNITURE', 'BLACKSMITHING', 'BLACKSMITH' }, weight = 0.7 },
+                { names = { 'METALCRAFT', 'METAL_CRAFT' },          weight = 0.5 },
             },
             attrs  = { phys = { 'STRENGTH', 'AGILITY' }, ment = { 'CREATIVITY', 'KINESTHETIC_SENSE', 'SPATIAL_SENSE' } },
             traits = {},
@@ -166,16 +170,16 @@ local function roles()
         {
             id = 'Soldier (Melee)',
             skills = {
-                { name = 'MELEE_COMBAT', weight = 0.5 },
-                { name = 'AXE',          weight = 1.0 },
-                { name = 'SWORD',        weight = 1.0 },
-                { name = 'MACE',         weight = 1.0 },
-                { name = 'HAMMER',       weight = 1.0 },
-                { name = 'SPEAR',        weight = 1.0 },
-                { name = 'FIGHTER',      weight = 0.5 },
-                { name = 'ARMOR',        weight = 0.6 },
-                { name = 'SHIELD',       weight = 0.6 },
-                { name = 'DODGING',      weight = 0.5 },
+                { names = { 'MELEE_COMBAT' }, weight = 0.5 },
+                { names = { 'AXE' },          weight = 1.0 },
+                { names = { 'SWORD' },        weight = 1.0 },
+                { names = { 'MACE' },         weight = 1.0 },
+                { names = { 'HAMMER' },       weight = 1.0 },
+                { names = { 'SPEAR' },        weight = 1.0 },
+                { names = { 'FIGHTER' },      weight = 0.5 },
+                { names = { 'ARMOR' },        weight = 0.6 },
+                { names = { 'SHIELD' },       weight = 0.6 },
+                { names = { 'DODGING' },      weight = 0.5 },
             },
             attrs  = { phys = { 'STRENGTH', 'AGILITY', 'TOUGHNESS', 'ENDURANCE' }, ment = { 'KINESTHETIC_SENSE', 'WILLPOWER' } },
             traits = {},
@@ -236,8 +240,13 @@ local function unit_skills(u)
 end
 
 local function unit_attrs(u)
+    -- Physical attrs live on the unit body (u.body.physical_attrs), mental
+    -- attrs live on the soul (u.status.current_soul.mental_attrs). Reading
+    -- physical from the soul yields nothing, which is why the page showed
+    -- "? / ?" for every physical attribute.
     local phys, ment = {}, {}
-    local pa = try(function() return u.status.current_soul.physical_attrs end, nil)
+    local pa = try(function() return u.body.physical_attrs end, nil)
+                or try(function() return u.physical_attrs end, nil)
     local ma = try(function() return u.status.current_soul.mental_attrs end, nil)
     if pa then for _, r in ipairs(pa) do phys[#phys + 1] = attr_pair(r) end end
     if ma then for _, r in ipairs(ma) do ment[#ment + 1] = attr_pair(r) end end
