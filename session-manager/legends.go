@@ -12,15 +12,82 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
 )
 
 // xmlPrologRe matches an XML declaration so we can rewrite the encoding
 // attribute. DF writes single-quoted CP437; we transcode to UTF-8 and need
 // the prolog to agree, otherwise strict parsers may reject the document.
 var xmlPrologRe = regexp.MustCompile(`(?i)^<\?xml[^?]*\?>`)
+
+// cp437OEMTable is a per-byte CP437 → Unicode lookup. DF's font and the
+// in-game text engine treat the C0 control range (0x01..0x1F, 0x7F) as
+// printable OEM glyphs (smileys, hearts, arrows, suns) and embeds those
+// bytes inside artifact, poetic-form, and musical-form names. Decoding
+// them as raw control chars produces XML 1.0 garbage that DOMParser
+// rejects, so we map them to the canonical OEM-glyph code points.
+//
+// TAB (0x09), LF (0x0A), and CR (0x0D) are preserved verbatim because DF
+// uses them structurally (indentation, line breaks) — overriding them
+// would corrupt the document layout.
+var cp437OEMTable [256]rune
+
+func init() {
+	dec := charmap.CodePage437.NewDecoder()
+	for i := 0; i < 256; i++ {
+		out, err := dec.Bytes([]byte{byte(i)})
+		if err != nil || len(out) == 0 {
+			cp437OEMTable[i] = utf8.RuneError
+			continue
+		}
+		r, _ := utf8.DecodeRune(out)
+		cp437OEMTable[i] = r
+	}
+	// Override the C0 control range with OEM glyphs. These are the standard
+	// IBM PC/CP437 hardware-font interpretations of the control bytes.
+	oem := map[byte]rune{
+		0x01: '☺', 0x02: '☻', 0x03: '♥', 0x04: '♦', 0x05: '♣', 0x06: '♠',
+		0x07: '•', 0x08: '◘', 0x0B: '♂', 0x0C: '♀', 0x0E: '♫', 0x0F: '☼',
+		0x10: '►', 0x11: '◄', 0x12: '↕', 0x13: '‼', 0x14: '¶', 0x15: '§',
+		0x16: '▬', 0x17: '↨', 0x18: '↑', 0x19: '↓', 0x1A: '→', 0x1B: '←',
+		0x1C: '∟', 0x1D: '↔', 0x1E: '▲', 0x1F: '▼', 0x7F: '⌂',
+	}
+	for b, r := range oem {
+		cp437OEMTable[b] = r
+	}
+}
+
+// cp437OEMReader streams a CP437/OEM byte source as UTF-8, applying the
+// table above. Ten-line implementation rather than another transform
+// chain because every input byte maps to exactly one rune; no state, no
+// look-ahead.
+type cp437OEMReader struct {
+	src io.Reader
+	in  [4096]byte
+	buf []byte
+}
+
+func (r *cp437OEMReader) Read(p []byte) (int, error) {
+	if len(r.buf) == 0 {
+		n, err := r.src.Read(r.in[:])
+		if n == 0 {
+			return 0, err
+		}
+		// Worst case 1 input byte → 3 UTF-8 bytes (no rune > U+FFFF here).
+		out := make([]byte, 0, n*3)
+		var enc [utf8.UTFMax]byte
+		for i := 0; i < n; i++ {
+			w := utf8.EncodeRune(enc[:], cp437OEMTable[r.in[i]])
+			out = append(out, enc[:w]...)
+		}
+		r.buf = out
+	}
+	n := copy(p, r.buf)
+	r.buf = r.buf[n:]
+	return n, nil
+}
 
 // legendsNameRe matches DF's legends export filenames. DF 50+/53.x writes
 // "<savename>-<datestamp>-legends.xml" (vanilla) and, when DFHack is loaded,
@@ -117,7 +184,7 @@ func (m *Manager) handleLegendsXML(w http.ResponseWriter, r *http.Request) {
 	// XML well-formedness — DOMParser bails partway through, leaving
 	// historical_figure / entity / historical_event empty.
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	br := bufio.NewReader(transform.NewReader(f, charmap.CodePage437.NewDecoder()))
+	br := bufio.NewReader(&cp437OEMReader{src: f})
 
 	// Pull the first 200 bytes to inspect the prolog. CP437 0x01..0x1F map
 	// to printable Unicode glyphs that ARE legal in XML content (smileys,

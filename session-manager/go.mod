@@ -6,7 +6,9 @@ require (
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/go-webauthn/webauthn v0.17.2
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/text v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.50.0
 )
 
 require (
@@ -26,9 +28,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.50.0 // indirect
 )
