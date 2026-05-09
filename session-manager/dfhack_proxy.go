@@ -16,10 +16,16 @@ const dfhackTimeout = 10 * time.Second
 
 // dfhackRun runs a DFHack command in the user's container and returns stdout.
 // dfhack-run sends the command over the DFHack command socket (FIFO in the container).
+//
+// The absolute path /opt/df/dfhack-run matters: dfhack-run lives in the DFHack
+// install tree which is /opt/df, and `docker exec` does NOT inherit the
+// container's WORKDIR-relative PATH — it uses the default PATH only. Calling
+// the bare name fails with "executable file not found", which surfaces as a
+// 503 and the misleading "DFHack unavailable" message in the UI.
 func dfhackRun(uid string, args ...string) (string, error) {
 	containerName := fmt.Sprintf("df-%s", uid)
 	rt := containerRuntime()
-	cmdArgs := append([]string{"exec", containerName, "dfhack-run"}, args...)
+	cmdArgs := append([]string{"exec", containerName, "/opt/df/dfhack-run"}, args...)
 	ctx, cancel := context.WithTimeout(context.Background(), dfhackTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, rt, cmdArgs...)

@@ -7,5 +7,21 @@
 # service is marked down and supervise itself exits. Combined with svscanctl
 # -t to bring the rest of the supervision tree down, this terminates the
 # container cleanly with no race against s6's restart logic.
+
+# Final flush of legends/world exports from /opt/df into the bind-mounted
+# data dir. The exports/run poller has up to a few seconds of lag, so any
+# file the user wrote just before stop would be lost when the container is
+# removed. Mirror the patterns from s6/exports/run.
+BIND_DIR="/root/.local/share/Bay 12 Games/Dwarf Fortress"
+if [ -d "$BIND_DIR" ]; then
+    for f in /opt/df/*-legends.xml /opt/df/*-legends_plus.xml \
+             /opt/df/*-world_history.txt /opt/df/*-world_sites_and_pops.txt \
+             /opt/df/*-world_gen_param.txt \
+             /opt/df/*-world_map.bmp /opt/df/*-world_map.png /opt/df/*-world_map.jpg \
+             /opt/df/*-detailed.bmp /opt/df/*-detailed.png; do
+        [ -f "$f" ] && mv -f "$f" "$BIND_DIR/" 2>/dev/null || true
+    done
+fi
+
 s6-svscanctl -t /etc/s6
 exit 125
