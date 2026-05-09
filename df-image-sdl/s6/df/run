@@ -15,16 +15,16 @@ cd /opt/df
 # Redirect gamelog.txt into the bind-mounted save dir for host-side tailing.
 /link-gamelog.sh || true
 
-# On SIGTERM (sent by s6 during container shutdown) send the in-game quit-save
-# key sequence, then wait for DF to finish writing the save before exiting.
-# s6 sends SIGTERM only to this shell's PID, not to the DF process group, so DF
-# stays alive long enough for the key sequence to take effect.
-_quit() {
-    /quit-sdl.sh
+# On SIGTERM (sent by s6 during container shutdown) forward the signal to DF
+# so it exits promptly. The wrapper does NOT attempt to trigger an in-game
+# save — saving is the player's responsibility and any blind keystroke
+# injection would only work on the fortress play screen.
+_term() {
+    kill -TERM "$DF_PID" 2>/dev/null
     wait "$DF_PID" 2>/dev/null
     exit 0
 }
-trap _quit TERM
+trap _term TERM
 
 # Launch through DFHack if installed, otherwise run DF directly.
 if [ -x /opt/df/dfhack ]; then

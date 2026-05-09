@@ -95,13 +95,13 @@
 
   <button class="btn" type="button" onclick="stopGame()"
           style="border-color:#a06060;color:#c08080">
-    &#9209; Stop game (saves your progress)
+    &#9209; Stop game
   </button>
-  <p class="hint">Ends the current session. Your saves stay in your account.</p>
+  <p class="hint">Ends the current session. <strong>Save in-game first</strong> — the wrapper does not save for you. Your last in-game save stays in your account.</p>
   <p id="stop-status"></p>
 
   <a class="btn" href="/account/export"
-     onclick="return confirm('This will END your active game session (your progress is saved first) and download all your saves as a tar.gz archive. For a copy without ending your session, use Snapshot instead. Continue?');"
+     onclick="return confirm('This will END your active game session and download all your saves as a tar.gz archive. The wrapper does NOT save for you — save in-game first, otherwise only your last in-game save is included. For a copy without ending your session, use Snapshot instead. Continue?');"
      style="border-color:#a06060;color:#c08080">
     &#9209; Stop session and download all saves
   </a>
@@ -183,7 +183,7 @@ async function enrollPasskey() {
 }
 
 async function stopGame() {
-  if (!confirm('Stop your running game? Your progress will be saved first.')) return;
+  if (!confirm('Stop your running game? The wrapper will NOT save for you — make sure you have saved in-game first. Continue?')) return;
   const status = document.getElementById('stop-status');
   status.className = '';
   status.textContent = 'Stopping…';
@@ -196,7 +196,7 @@ async function stopGame() {
     }
     if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
     status.className = 'ok';
-    status.textContent = 'Game stopped. Saves are intact.';
+    status.textContent = 'Game stopped.';
   } catch (e) {
     status.className = 'err';
     status.textContent = 'Stop failed: ' + e.message;

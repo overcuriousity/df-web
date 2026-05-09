@@ -11,8 +11,8 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 
 - **SDL render mode** — full graphics via noVNC (tilesets, mouse support).
 - **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC (shown only when configured).
-- **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. On idle timeout the game is saved before the container stops.
-- **Idle warning + keepalive** — `/play` shows a live "time until disconnect" chip and pops a warning dialog with a one-click "keep playing" button before the idle reaper fires.
+- **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. The wrapper does not trigger in-game saves — save in DF yourself; on idle timeout the container is stopped and only your last in-game save is preserved.
+- **Idle warning + keepalive** — `/play` shows a live "time until disconnect" chip and pops a warning dialog with a one-click "keep playing" button before the idle reaper fires, giving you time to save in-game.
 - **Hot save snapshot** — `/account` has a "Snapshot saves" button that downloads a tar.gz of the user's save dir without stopping the running game container, alongside the existing stop-and-export flow.
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
@@ -126,7 +126,7 @@ Use `--no-cache` whenever Dockerfiles change (including base image layers). Runn
 | `saves_root` | `/srv/df/users` | Root directory for per-user save volumes |
 | `image_sdl` | `df-image-sdl` | Docker image name for SDL mode |
 | `docker_network` | `df_internal` | Docker network for game containers |
-| `idle_timeout` | `30m` | Inactivity time before container is stopped and game is saved |
+| `idle_timeout` | `30m` | Inactivity time before the container is stopped (only the last in-game save is preserved) |
 | `max_sessions` | `5` | Maximum concurrent game containers |
 | `cookie_key` | — | **Required.** 64 hex chars (32 bytes). Generate: `openssl rand -hex 32` |
 | `rp_id` | — | WebAuthn relying party hostname, e.g. `df.example.com` |

@@ -47,10 +47,6 @@ COPY s6/ /etc/s6/
 # Audio streaming helper.
 COPY serve-audio.py /serve-audio.py
 
-# Wrapper that sends DF a quit-save via xdotool when the container stops.
-COPY quit-sdl.sh /quit-sdl.sh
-RUN chmod +x /quit-sdl.sh
-
 # Spawn-time hook: copies user-uploaded tilesets into data/art and patches
 # init.txt with the active selection (DF_ACTIVE_TILESET env var). Invoked
 # from s6/df/run before launching DF.

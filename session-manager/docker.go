@@ -119,11 +119,12 @@ func dockerRun(cfg *Config, uid, image, activeTileset string) (id string, err er
 	return strings.TrimSpace(out), nil
 }
 
-// dockerStop sends SIGTERM to the container (triggers the quit-save script) then removes it.
+// dockerStop sends SIGTERM to the container so DF exits, then removes it.
+// No in-game save is triggered — the player is responsible for saving.
 func dockerStop(id string) error {
-	// --time=45 gives s6 → df/run trap → quit-sdl.sh → DF's save flow time
-	// to finish writing the world to disk before SIGKILL.
-	if err := runDockerNoOut("stop", "--time=45", id); err != nil {
+	// --time=15 is plenty for s6 → df/run trap → DF SIGTERM exit. DF doesn't
+	// catch the signal and exits promptly.
+	if err := runDockerNoOut("stop", "--time=15", id); err != nil {
 		return err
 	}
 	return runDockerNoOut("rm", "-f", id)

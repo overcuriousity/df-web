@@ -1,7 +1,7 @@
 #!/bin/sh
 # DF exited. Bring the container down instead of letting s6 silently respawn
 # dwarfort — without this, a crash or OOM-kill loops forever and looks like
-# "back to the title screen", and quit-save never runs.
+# "back to the title screen".
 #
 # s6-supervise treats finish exit code 125 as "permanent failure": the
 # service is marked down and supervise itself exits. Combined with svscanctl
