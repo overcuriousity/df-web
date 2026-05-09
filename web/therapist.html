@@ -20,13 +20,12 @@
   a:hover { color: var(--gold); }
 
   /* Layout */
-  .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; }
+  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
   header.bar { background: var(--bg-2); border-bottom: 1px solid var(--border); padding: 0.4rem 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
   header.bar h1 { color: var(--gold); font-size: 13px; font-weight: normal; letter-spacing: 0.1em; margin-right: 0.6rem; }
   header.bar .grow { flex: 1; }
   header.bar .pop { color: var(--fg-dim); font-size: 11px; }
   header.bar .pending-count { color: var(--warn); font-weight: bold; }
-  .banner { background: #2a241a; color: var(--warn); padding: 0.3rem 0.6rem; font-size: 11px; border-bottom: 1px solid var(--border); }
 
   main.body { display: grid; grid-template-columns: 240px 1fr 240px; min-height: 0; }
   aside.docks { background: var(--bg-2); border-right: 1px solid var(--border); overflow-y: auto; }
@@ -193,10 +192,6 @@
   <a class="btn" href="/play" title="Back to game">← Game</a>
 </header>
 
-<div class="banner" id="caveat-banner">
-  Note — DF 53.x's <em>Work Details</em> system reasserts labor flags every tick, so per-labor toggles here may revert. Use this to read state and to set nicknames / custom professions; for production labor management, manage Work Details in-game.
-</div>
-
 <main class="body">
 
   <aside class="docks left">
@@ -291,14 +286,16 @@ const VIEWS = [
   { id: 'animals',    label: 'Animals' },
 ];
 
+// For dwarves DF's "caste" enumeration is just MALE/FEMALE, so a separate
+// "Sex" group was a duplicate. "Has nickname" is also dropped because DF
+// Premium auto-assigns earned nicknames to most dwarves, leaving the group
+// almost always collapsed to a single bucket.
 const GROUPS = [
   { id: 'none',       label: 'No grouping',     fn: (_u) => '' },
   { id: 'profession', label: 'Profession',      fn: u => u.profession || '(none)' },
   { id: 'wave',       label: 'Migration Wave',  fn: u => 'Wave ' + (u.wave || 0) },
-  { id: 'caste',      label: 'Caste',           fn: u => u.caste || '(?)' },
-  { id: 'sex',        label: 'Sex',             fn: u => u.caste || '(?)' },
+  { id: 'caste',      label: 'Caste / Sex',     fn: u => u.caste || '(?)' },
   { id: 'happiness',  label: 'Happiness',       fn: u => u.happiness || 'Unknown' },
-  { id: 'has-nick',   label: 'Has Nickname',    fn: u => u.nickname ? 'With nickname' : 'Without nickname' },
   { id: 'legendary',  label: 'Legendary',       fn: u => u.legendary ? 'Legendary' : 'Mortal' },
   { id: 'squad',      label: 'Squad',           fn: u => (u.squad && u.squad.id >= 0) ? (u.squad.name || ('Squad ' + u.squad.id)) : 'Civilian' },
   { id: 'totlabors',  label: 'Total Labors',    fn: u => 'Labors ' + bucket10(u.labors.filter(Boolean).length) },
@@ -357,8 +354,8 @@ const state = {
 function loadUI() {
   try {
     const s = JSON.parse(localStorage.getItem('therapist.ui') || '{}');
-    if (s.view) state.view = s.view;
-    if (s.group) state.group = s.group;
+    if (s.view && VIEWS.some(v => v.id === s.view)) state.view = s.view;
+    if (s.group && GROUPS.some(g => g.id === s.group)) state.group = s.group;
     if (s.sort) state.sort = s.sort;
     if (s.filter) state.filter = s.filter;
     if (s.docks) state.ui.docks = s.docks;
