@@ -1,22 +1,30 @@
 -- web-commit: apply a batch of pending changes from /therapist.
--- Invoked via: dfhack-run web-commit '<JSON payload>'
+-- Invoked via: dfhack-run web-commit <hex-encoded JSON>
 -- Payload shape (every key optional):
 --   { "labors":[{"unit_id":N,"labor":I,"enabled":bool}, ...],
 --     "nicknames":[{"unit_id":N,"nickname":"..."}, ...],
 --     "custom_profession":[{"unit_id":N,"name":"..."}, ...] }
 -- Output: JSON {"applied":N, "errors":[{"kind":"...","unit_id":N,"reason":"..."}, ...]}.
 --
--- The proxy strips ANSI escapes and forwards JSON output verbatim. Errors are
--- collected and returned rather than raised so a single bad cell doesn't
--- abort the whole commit.
+-- Why hex on the wire: dfhack-run's command parser splits the script's argv
+-- on whitespace, so a JSON payload like {"nickname":"Test User"} arrived in
+-- Lua as {"nickname":"Test instead of the whole document, and json.decode
+-- failed silently — making it look like Commit did nothing in-game. Hex
+-- encoding avoids whitespace, quotes, and shell metachars entirely. The 2x
+-- size blowup is fine for batches with at most a few thousand changes.
 
 local json = require('json')
 
+local function hex_decode(s)
+    return (s:gsub('..', function(cc) return string.char(tonumber(cc, 16) or 0) end))
+end
+
 local args = {...}
-local payload_str = args[1] or '{}'
+local hex_in = args[1] or ''
+local payload_str = (#hex_in > 0) and hex_decode(hex_in) or '{}'
 local ok, payload = pcall(json.decode, payload_str)
 if not ok or type(payload) ~= 'table' then
-    print(json.encode({ applied = 0, errors = { { kind = 'parse', reason = 'invalid JSON payload' } } }))
+    print(json.encode({ applied = 0, errors = { { kind = 'parse', reason = 'invalid JSON payload after hex-decode' } } }))
     return
 end
 

@@ -42,6 +42,8 @@
   .btn:hover, .btn-sm:hover { background: #5a4a38; }
   .btn.warn { color: var(--warn); border-color: var(--warn); }
   .btn.good { color: var(--good); border-color: var(--good); }
+  .btn.has-pending { background: #1f4f1f; color: #c0e0c0; border-color: var(--good); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(110,192,110,0.4); } 50% { box-shadow: 0 0 0 6px rgba(110,192,110,0); } }
   .btn:disabled { opacity: 0.4; cursor: default; }
   select, input[type=text], input[type=search] {
     background: var(--border); color: var(--fg); border: 1px solid var(--accent);
@@ -616,6 +618,28 @@ function findPendingLabor(unit_id, labor) {
   return state.pending.labors.findIndex(p => p.unit_id === unit_id && p.labor === labor);
 }
 
+// Single-cell click in the Labors view: apply immediately, optimistic UI.
+// Bulk operations (Optimize, custom-profession apply) still go through
+// queueLabor + Commit so the user can review them before they hit DF.
+async function applyLaborImmediate(u, labor, enabled) {
+  const prev = u.labors[labor];
+  u.labors[labor] = enabled; // optimistic
+  render();
+  try {
+    const r = await fetch('/play/dfhack/labor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_id: u.id, labor, enabled }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    statusMsg(`${state.enums.labor[labor] || 'labor'} ${enabled ? 'on' : 'off'} → ${u.name}`);
+  } catch (e) {
+    u.labors[labor] = prev; // revert on error
+    render();
+    statusMsg('Failed to set labor: ' + e.message, 'var(--bad)');
+  }
+}
+
 function queueLabor(unit_id, labor, enabled) {
   const idx = findPendingLabor(unit_id, labor);
   if (idx >= 0) state.pending.labors[idx].enabled = enabled;
@@ -658,6 +682,7 @@ function refreshPendingUI() {
   const total = pendingTotal();
   $('pending-count').textContent = total;
   $('pending-count-2').textContent = total;
+  $('commit-btn').classList.toggle('has-pending', total > 0);
   const ul = $('pending-list');
   ul.innerHTML = '';
   const nameOf = (id) => (state.units.find(u => u.id === id) || {}).name || ('#' + id);
@@ -714,28 +739,46 @@ function runOptimize() {
   if (!state.loaded) return;
   const N = parseInt(prompt('Optimize: assign each role\'s labors to the top-N dwarves by role score. N =', '3') || '0', 10);
   if (!N || N <= 0) return;
-  // Map skill name → labor IDs (heuristic: same name root, e.g. MASONRY → MASON labor).
   const laborByName = {};
   for (const [id, name] of Object.entries(state.enums.labor)) laborByName[name] = +id;
-  const skillToLaborId = (skillName) => {
-    // Try exact, then prefix match.
-    if (laborByName[skillName] != null) return laborByName[skillName];
-    // crude name-mapping table for common skill→labor pairs
-    const map = {
-      MINING:'MINE', WOOD_CUTTING:'CUTWOOD', CARPENTRY:'CARPENTER', MASONRY:'MASON',
-      MECHANICS:'MECHANIC', DIAGNOSE:'DIAGNOSE', SURGERY:'SURGERY', SUTURING:'SUTURE',
-      SET_BONE:'BONE_SETTING', DRESS_WOUNDS:'DRESSING_WOUNDS', PLANT:'PLANT',
-      HERBALISM:'HERBALIST', BREWING:'BREWER', COOK:'COOK', SMELT:'SMELT',
-      FORGE_WEAPON:'WEAPONSMITH', FORGE_ARMOR:'ARMORSMITH', FORGE_FURNITURE:'BLACKSMITH',
-      METALCRAFT:'METAL_CRAFT', PROCESSPLANTS:'PROCESS_PLANT',
-    };
-    return laborByName[map[skillName]];
+  // Map skill-token → labor ID by name kinship; tries the obvious aliases first
+  // before the explicit fallback table. Returns null if no labor matches the
+  // role's skill on this DF build, in which case the role is skipped.
+  const ALIAS = {
+    MINING: ['MINE'],
+    WOODCUTTING: ['CUTWOOD'], WOOD_CUTTING: ['CUTWOOD'], AXE: ['CUTWOOD'],
+    CARPENTRY: ['CARPENTER'], MASONRY: ['MASON'],
+    MECHANICS: ['MECHANIC'], MECHANIC: ['MECHANIC'],
+    DIAGNOSE: ['DIAGNOSE'], SURGERY: ['SURGERY'], SUTURING: ['SUTURE','SUTURING'],
+    SET_BONE: ['BONE_SETTING'], BONE_SETTING: ['BONE_SETTING'],
+    DRESS_WOUNDS: ['DRESSING_WOUNDS'], DRESSING_WOUNDS: ['DRESSING_WOUNDS'],
+    PLANT: ['PLANT','GROW'], HERBALISM: ['HERBALIST'], BREWING: ['BREWER'],
+    COOK: ['COOK'], COOKING: ['COOK'],
+    SMELT: ['SMELT_ORE','FURNACE_OPERATOR','SMELT'], FURNACE_OPERATOR: ['FURNACE_OPERATOR'],
+    FORGE_WEAPON: ['WEAPONSMITH','FORGE_WEAPON'], WEAPONSMITH: ['WEAPONSMITH'],
+    FORGE_ARMOR: ['ARMORSMITH','FORGE_ARMOR'], ARMORSMITH: ['ARMORSMITH'],
+    FORGE_FURNITURE: ['BLACKSMITH','FORGE_FURNITURE'], BLACKSMITH: ['BLACKSMITH'],
+    METALCRAFT: ['METAL_CRAFT'], PROCESSPLANTS: ['PROCESS_PLANT'],
   };
+  const skillToLaborId = (skillName) => {
+    if (laborByName[skillName] != null) return laborByName[skillName];
+    for (const alias of ALIAS[skillName] || []) {
+      if (laborByName[alias] != null) return laborByName[alias];
+    }
+    return null;
+  };
+  state.pending.labors = []; // start with a clean slate so successive Optimize runs aren't additive
   for (const role of state.roles) {
     const ranked = state.units.map(u => ({ u, s: roleScore(u, role.id) }))
       .sort((a, b) => b.s - a.s).slice(0, N);
     const top = new Set(ranked.map(x => x.u.id));
-    const laborIds = (role.skills || []).map(s => skillToLaborId(s.name)).filter(x => x != null);
+    // Resolve labor IDs from role.skills, accepting both the new {names: [...]}
+    // and legacy {name: '...'} shapes.
+    const laborIds = (role.skills || []).flatMap(s => {
+      const candidates = s.names || (s.name ? [s.name] : []);
+      for (const n of candidates) { const lid = skillToLaborId(n); if (lid != null) return [lid]; }
+      return [];
+    });
     if (!laborIds.length) continue;
     for (const u of state.units) {
       const enable = top.has(u.id);
@@ -744,8 +787,9 @@ function runOptimize() {
       }
     }
   }
+  refreshPendingUI();
   render();
-  statusMsg(`Optimizer staged ${pendingTotal()} change(s) — review and Commit when ready.`);
+  statusMsg(`Optimizer staged ${pendingTotal()} change(s) — review the Pending Changes dock and press Commit to apply.`);
 }
 
 // ============================================================================
@@ -1099,7 +1143,7 @@ function renderUnitRow(u, cols) {
       const r = u.skills.find(s => s.id === skillIdForLabor(lid));
       td.textContent = on ? (r && r.rating > 0 ? r.rating : '✓') : '';
       td.title = state.enums.labor[lid];
-      td.onclick = (e) => { e.stopPropagation(); queueLabor(u.id, lid, !on); render(); };
+      td.onclick = (e) => { e.stopPropagation(); applyLaborImmediate(u, lid, !on); };
     } else if (c.id.startsWith('skill:')) {
       const sid = +c.id.slice(6);
       const r = u.skills.find(s => s.id === sid);

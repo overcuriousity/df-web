@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,7 +170,10 @@ func (m *Manager) handleDFHackCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := dfhackRunWithTimeout(dfhackTimeoutHeavy, uid, "web-commit", string(body))
+	// Hex-encode the body so DFHack's whitespace-splitting argv parser can't
+	// truncate JSON strings that contain spaces (e.g. nicknames). The Lua
+	// script hex-decodes and then JSON.decodes.
+	out, err := dfhackRunWithTimeout(dfhackTimeoutHeavy, uid, "web-commit", hex.EncodeToString(body))
 	if err != nil {
 		http.Error(w, "dfhack error: "+err.Error(), http.StatusServiceUnavailable)
 		return
