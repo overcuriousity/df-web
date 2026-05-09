@@ -76,7 +76,14 @@ func main() {
 	// DFHack endpoints — only registered when dfhack_enabled: true in config.yml
 	if cfg.DFHackEnabled {
 		mux.Handle("/play/dfhack/units", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackUnits)))
+		mux.Handle("/play/dfhack/units/full", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackUnitsFull)))
+		mux.Handle("/play/dfhack/animals", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackAnimals)))
 		mux.Handle("/play/dfhack/labor", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackSetLabor)))
+		mux.Handle("/play/dfhack/commit", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackCommit)))
+		// Therapist page: also gated on DFHack so disabling DFHack hides it.
+		mux.Handle("/therapist", mgr.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(webDir, "therapist.html"))
+		})))
 	}
 	// Capabilities endpoint: lets the frontend discover which optional features are active.
 	mux.Handle("/session/capabilities", mgr.requireAuth(http.HandlerFunc(mgr.handleCapabilities)))

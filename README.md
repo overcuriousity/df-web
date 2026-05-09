@@ -232,16 +232,20 @@ DFHack is downloaded at image build time when `--build-arg DFHACK_VERSION=<ver>`
 
 - Autoloads `enable manipulator` (in-game Therapist-style labor screen) via `dfhack-config/init/dfhack.init`.
 - Exposes the DFHack remote API on port 5000 inside the Docker network.
-- Ships two Lua scripts in `df-image-sdl/hack/scripts/`:
-  - `web-units.lua` — emits a JSON list of dwarves with their current labor flags
-  - `web-setlabor.lua` — toggles a single labor on a single dwarf
+- Ships Lua scripts in `df-image-sdl/hack/scripts/` that the session-manager invokes via `dfhack-run`:
+  - `web-units.lua` — slim citizen roster for the `/play` sidebar
+  - `web-units-full.lua` — full Dwarf-Therapist payload (enums, roles, skills, attributes, labors, traits, needs, health, squad)
+  - `web-animals.lua` — tame/owned creatures roster
+  - `web-setlabor.lua` — toggle one labor on one dwarf
+  - `web-commit.lua` — apply a batch of labor / nickname / custom-profession changes
 
-The session-manager talks to DFHack with `docker exec <user-container> dfhack-run …` (`session-manager/dfhack_proxy.go`) and exposes:
+The session-manager talks to DFHack with `docker exec <user-container> /opt/df/dfhack-run …` (`session-manager/dfhack_proxy.go`) and exposes:
 
-- `GET /play/dfhack/units`
-- `POST /play/dfhack/labor` (`{unit_id, labor, enabled}`)
+- `GET /play/dfhack/units` · `GET /play/dfhack/units/full` · `GET /play/dfhack/animals`
+- `POST /play/dfhack/labor` · `POST /play/dfhack/commit`
+- `GET /therapist` — full-window Dwarf Therapist replica
 
-The `/play` page shows a "Dwarves" sidebar tab when `/session/capabilities` reports DFHack is on, with a labor-checkbox grid that calls those endpoints.
+The `/play` page shows a read-only "Dwarves" sidebar tab when `/session/capabilities` reports DFHack is on, with a link that opens `/therapist` in a new tab. The therapist page provides view tabs (Overview, Labors, Skills, Attributes, Roles, Social, Military, Health, Animals), grouping/sorting/filtering, a pending-changes queue with a single Commit step, custom-profession management (browser-side), a top-N optimizer, CSV export, and DT-style hotkeys (Ctrl+R refresh, Ctrl+T commit, Ctrl+E clear). DF 53.x's in-game **Work Details** system reasserts labor flags every tick, so per-labor toggles in the therapist may revert — use the page primarily for reading state, setting nicknames / custom professions, and informing in-game Work Details decisions.
 
 ## Architecture
 
