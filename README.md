@@ -1,6 +1,6 @@
 # df-web
 
-Play Dwarf Fortress Classic in a browser with session persistence, multi-user support, three auth methods, and an in-browser storyteller sidebar (journal, live announcements, legends viewer, optional DFHack labor panel).
+Play Dwarf Fortress Classic in a browser with session persistence, multi-user support, three auth methods, and an in-browser storyteller sidebar (journal, live announcements, optional DFHack labor panel).
 
 > **Dwarf Fortress is the work of [Bay 12 Games](https://www.bay12games.com/dwarves/).**
 > If you enjoy this wrapper, please buy the game on Steam or
@@ -19,7 +19,7 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
 - **DoS protection** — configurable concurrent session cap and per-container CPU/memory/PID limits.
 - **Per-user tilesets** — users can upload their own PNG tilesets at `/account` (validated, size- and count-limited) and choose an active one; applied at container spawn. Operators can still bake tilesets into the image as the default.
-- **Storyteller sidebar** — per-fortress markdown journal, live announcement feed (gamelog.txt), legends XML viewer. Always available, no third-party tools required.
+- **Storyteller sidebar** — per-fortress markdown journal, live announcement feed (gamelog.txt). Always available, no third-party tools required.
 - **DFHack integration** (optional) — when the image is built with DFHack, the in-game `manipulator` labor screen autoloads and a "Dwarves" tab appears in the `/play` sidebar with a labor panel backed by `dfhack-run`. Vanilla DF works without it.
 - **Admin web UI** — admins get an `/admin` page to list users, create accounts, rotate access keys, and delete users (which stops the running container and removes the save dir). The admin flag itself is set only via the host-side script — never via the web UI.
 
@@ -223,7 +223,8 @@ Always available in `/play`, no DFHack required:
 
 - **Journal** — per-fortress markdown notes, persisted in the user's save directory.
 - **Announcements** — live tail of `gamelog.txt` from the running container.
-- **Legends** — a list of exported worlds and an in-browser legends-XML viewer at `/legends` (use DF's "Export legends" first; the wrapper does not trigger exports).
+
+For legends, use Dwarf Fortress's built-in legends viewer (Legends mode in DF) — the wrapper deliberately doesn't reimplement it.
 
 ## DFHack integration (optional)
 
@@ -259,7 +260,6 @@ Browser → (your TLS reverse proxy) → 127.0.0.1:8080
                                     ├─ /play/audio          audio stream from container
                                     ├─ /play/journal        per-fortress markdown notes
                                     ├─ /play/timeline       live gamelog.txt tail
-                                    ├─ /play/legends, /legends   legends XML viewer
                                     ├─ /play/dfhack/*       (when dfhack_enabled)
                                     ├─ /session/status      idle countdown
                                     ├─ /session/keepalive   reset idle timer

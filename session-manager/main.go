@@ -69,16 +69,10 @@ func main() {
 	mux.Handle("/account/tilesets", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesets)))
 	mux.Handle("/account/tilesets/", mgr.requireAuth(http.HandlerFunc(mgr.handleTilesetItem)))
 
-	// Storyteller bundle (journal + timeline + legends are always available)
+	// Storyteller bundle (journal + timeline)
 	mux.Handle("/play/saves", mgr.requireAuth(http.HandlerFunc(mgr.handleSaves)))
 	mux.Handle("/play/journal", mgr.requireAuth(http.HandlerFunc(mgr.handleJournal)))
 	mux.Handle("/play/timeline", mgr.requireAuth(http.HandlerFunc(mgr.handleTimeline)))
-	mux.Handle("/play/legends", mgr.requireAuth(http.HandlerFunc(mgr.handleLegendsIndex)))
-	mux.Handle("/play/legends/xml", mgr.requireAuth(http.HandlerFunc(mgr.handleLegendsXML)))
-	// Legends viewer page
-	mux.Handle("/legends", mgr.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(webDir, "legends.html"))
-	})))
 	// DFHack endpoints — only registered when dfhack_enabled: true in config.yml
 	if cfg.DFHackEnabled {
 		mux.Handle("/play/dfhack/units", mgr.requireAuth(http.HandlerFunc(mgr.handleDFHackUnits)))
