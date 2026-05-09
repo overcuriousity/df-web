@@ -11,7 +11,7 @@ local unit_id  = tonumber(args[1])
 local labor_id = tonumber(args[2])
 local enabled  = args[3] == '1'
 
-if not unit_id or not labor_id or labor_id < 0 or labor_id > 119 then
+if not unit_id or not labor_id or labor_id < 0 or labor_id > df.unit_labor._last_item then
     error('invalid arguments')
 end
 
