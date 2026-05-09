@@ -7,12 +7,18 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const dfhackTimeout = 10 * time.Second
+
+// ansiEscapeRe matches CSI sequences (`\x1b[...m` etc). dfhack-run prefixes
+// stdout with a color reset (`\x1b[0m`) regardless of TTY, which would break
+// JSON.parse on the browser side.
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // dfhackRun runs a DFHack command in the user's container and returns stdout.
 // dfhack-run sends the command over the DFHack command socket (FIFO in the container).
@@ -39,7 +45,7 @@ func dfhackRun(uid string, args ...string) (string, error) {
 		}
 		return "", fmt.Errorf("dfhack-run %v: %s", args, detail)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(ansiEscapeRe.ReplaceAllString(string(out), "")), nil
 }
 
 // handleDFHackUnits calls the web-units DFHack script and proxies its JSON output.
