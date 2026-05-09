@@ -20,7 +20,9 @@
   a:hover { color: var(--gold); }
 
   /* Layout */
-  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+  .app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; }
+  .banner { background: #2a241a; color: var(--warn); padding: 0.3rem 0.6rem; font-size: 11px; border-bottom: 1px solid var(--border); line-height: 1.4; }
+  .banner em { color: var(--gold); font-style: italic; }
   header.bar { background: var(--bg-2); border-bottom: 1px solid var(--border); padding: 0.4rem 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
   header.bar h1 { color: var(--gold); font-size: 13px; font-weight: normal; letter-spacing: 0.1em; margin-right: 0.6rem; }
   header.bar .grow { flex: 1; }
@@ -189,10 +191,14 @@
   <span class="pop" id="pop-summary"></span>
   <button class="btn good" id="commit-btn" onclick="commitPending()" title="Commit pending changes (Ctrl+T)">✓ Commit <span class="pending-count" id="pending-count">0</span></button>
   <button class="btn warn" onclick="clearPending()" title="Clear pending changes (Ctrl+E)">✗ Clear</button>
-  <button class="btn" onclick="runOptimize()" title="Run optimizer">⚙ Optimize</button>
+  <button class="btn" onclick="runOptimize()" title="Show role-based dwarf rankings; apply manually in DF's Labor menu">⚙ Suggest</button>
   <button class="btn" onclick="exportCSV()" title="Export current view as CSV">↓ CSV</button>
   <a class="btn" href="/play" title="Back to game">← Game</a>
 </header>
+
+<div class="banner">
+  Read-only labor view. DF 53.x's <em>Work Details</em> system reasserts every dwarf's labor flags every tick, so toggling cells here would be overwritten before you'd notice. Hover a labor cell to see which Work Detail controls it; change assignments in DF's in-game <em>Labor</em> menu. Nicknames and custom-profession edits in the Dwarf Details dock <em>do</em> persist.
+</div>
 
 <main class="body">
 
@@ -207,24 +213,6 @@
       <h3 onclick="toggleDock('pending')">Pending Changes (<span id="pending-count-2">0</span>)</h3>
       <div class="dock-body">
         <ul class="pending-list" id="pending-list"></ul>
-      </div>
-    </div>
-    <div class="dock" id="dock-custom">
-      <h3 onclick="toggleDock('custom')">Custom Professions</h3>
-      <div class="dock-body">
-        <div style="font-size:10px;color:var(--fg-dim);margin-bottom:0.3rem;line-height:1.35;">
-          A <em>custom profession</em> is a snapshot of one dwarf's currently-enabled labors.
-          Select a dwarf (click a row in the grid), give the snapshot a name, and click
-          <em>Save from selected</em>. To use it, select a different dwarf and press
-          <em>apply</em> next to the saved entry — it queues labor toggles to match the snapshot
-          plus a profession-name change. Nothing is sent to DF until you press
-          <em>Commit</em> in the toolbar. Stored only in this browser.
-        </div>
-        <div class="row">
-          <input type="text" id="custom-name" placeholder="snapshot name…" class="grow">
-          <button class="btn-sm" onclick="saveCustomFromSelection()">Save from selected</button>
-        </div>
-        <div id="custom-list" style="margin-top:0.4rem;"></div>
       </div>
     </div>
   </aside>
@@ -344,7 +332,6 @@ const state = {
   pending: { labors: [], nicknames: [], custom_profession: [] },
   collapsedGroups: new Set(),
   ui: { docks: {}, autoRefresh: false },
-  customProfessions: [],
   laborTranches: [],
   filtersOn: { health: new Set(), prefs: new Set() },
 };
@@ -362,14 +349,12 @@ function loadUI() {
     if (s.filter) state.filter = s.filter;
     if (s.docks) state.ui.docks = s.docks;
     if (s.collapsedGroups) state.collapsedGroups = new Set(s.collapsedGroups);
-    if (Array.isArray(s.customProfessions)) state.customProfessions = s.customProfessions;
   } catch (_) {}
 }
 function saveUI() {
   localStorage.setItem('therapist.ui', JSON.stringify({
     view: state.view, group: state.group, sort: state.sort, filter: state.filter,
     docks: state.ui.docks, collapsedGroups: [...state.collapsedGroups],
-    customProfessions: state.customProfessions,
   }));
 }
 
@@ -411,6 +396,20 @@ async function reload() {
     }));
     state.loaded = true;
     state.laborTranches = computeLaborTranches(state.enums.labor);
+    state.workDetails = doc.work_details || [];
+    // Build {unit_id: {labor_id: [wd_name, ...]}} so the Labors-view tooltip
+    // can show which Work Detail(s) currently control a given (unit, labor).
+    state.wdByUnitLabor = {};
+    for (const wd of state.workDetails) {
+      const labors = wd.labors || [];
+      const units = wd.units || [];
+      for (const uid of units) {
+        const m = state.wdByUnitLabor[uid] = state.wdByUnitLabor[uid] || {};
+        for (const lid of labors) {
+          (m[lid] = m[lid] || []).push(wd.name || '(unnamed)');
+        }
+      }
+    }
     if (state.view === 'animals') await loadAnimals();
     rebuildSortOptions();
     rebuildLegend();
@@ -614,43 +613,16 @@ function skillIdByName(name) {
 // Pending changes
 // ============================================================================
 
-function findPendingLabor(unit_id, labor) {
-  return state.pending.labors.findIndex(p => p.unit_id === unit_id && p.labor === labor);
-}
-
-// Single-cell click in the Labors view: apply immediately, optimistic UI.
-// Bulk operations (Optimize, custom-profession apply) still go through
-// queueLabor + Commit so the user can review them before they hit DF.
-async function applyLaborImmediate(u, labor, enabled) {
-  const prev = u.labors[labor];
-  u.labors[labor] = enabled; // optimistic
-  render();
-  try {
-    const r = await fetch('/play/dfhack/labor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unit_id: u.id, labor, enabled }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    statusMsg(`${state.enums.labor[labor] || 'labor'} ${enabled ? 'on' : 'off'} → ${u.name}`);
-  } catch (e) {
-    u.labors[labor] = prev; // revert on error
-    render();
-    statusMsg('Failed to set labor: ' + e.message, 'var(--bad)');
-  }
-}
-
-function queueLabor(unit_id, labor, enabled) {
-  const idx = findPendingLabor(unit_id, labor);
-  if (idx >= 0) state.pending.labors[idx].enabled = enabled;
-  else state.pending.labors.push({ unit_id, labor, enabled });
-  // If toggled back to original state, drop it.
-  const u = state.units.find(x => x.id === unit_id);
-  if (u && (u.labors[labor] === enabled)) {
-    if (idx >= 0) state.pending.labors.splice(idx, 1);
-  }
-  refreshPendingUI();
-}
+// Per-cell labor toggling is intentionally NOT wired up: DF 53.x's Work
+// Details system reasserts every dwarf's status.labors[] from the active
+// WD list each tick, so any flag we write here is overwritten as soon as
+// the game advances time. The Labors view is therefore read-only and each
+// cell tooltips the controlling Work Detail. Use DF's in-game Labor menu
+// to actually change who does what.
+//
+// Only nickname / custom_profession edits go through the pending queue —
+// they live on u.name.nickname / u.custom_profession and aren't touched
+// by Work Details.
 
 function queueNickname(unit_id, nickname) {
   const idx = state.pending.nicknames.findIndex(p => p.unit_id === unit_id);
@@ -735,112 +707,51 @@ async function commitPending() {
 // Optimizer (one preset: top-N per role)
 // ============================================================================
 
+// Suggest assignments: rank dwarves by role score and display the top-N for
+// each role. Output is informational only — DF 53.x's Work Details system
+// owns the actual labor flags, so the page can't apply assignments. Copy the
+// recommendations and configure Work Details in DF's in-game Labor menu.
 function runOptimize() {
   if (!state.loaded) return;
-  const N = parseInt(prompt('Optimize: assign each role\'s labors to the top-N dwarves by role score. N =', '3') || '0', 10);
+  const N = parseInt(prompt('Suggest assignments: list the top-N dwarves for each role.\nN =', '3') || '0', 10);
   if (!N || N <= 0) return;
-  const laborByName = {};
-  for (const [id, name] of Object.entries(state.enums.labor)) laborByName[name] = +id;
-  // Map skill-token → labor ID by name kinship; tries the obvious aliases first
-  // before the explicit fallback table. Returns null if no labor matches the
-  // role's skill on this DF build, in which case the role is skipped.
-  const ALIAS = {
-    MINING: ['MINE'],
-    WOODCUTTING: ['CUTWOOD'], WOOD_CUTTING: ['CUTWOOD'], AXE: ['CUTWOOD'],
-    CARPENTRY: ['CARPENTER'], MASONRY: ['MASON'],
-    MECHANICS: ['MECHANIC'], MECHANIC: ['MECHANIC'],
-    DIAGNOSE: ['DIAGNOSE'], SURGERY: ['SURGERY'], SUTURING: ['SUTURE','SUTURING'],
-    SET_BONE: ['BONE_SETTING'], BONE_SETTING: ['BONE_SETTING'],
-    DRESS_WOUNDS: ['DRESSING_WOUNDS'], DRESSING_WOUNDS: ['DRESSING_WOUNDS'],
-    PLANT: ['PLANT','GROW'], HERBALISM: ['HERBALIST'], BREWING: ['BREWER'],
-    COOK: ['COOK'], COOKING: ['COOK'],
-    SMELT: ['SMELT_ORE','FURNACE_OPERATOR','SMELT'], FURNACE_OPERATOR: ['FURNACE_OPERATOR'],
-    FORGE_WEAPON: ['WEAPONSMITH','FORGE_WEAPON'], WEAPONSMITH: ['WEAPONSMITH'],
-    FORGE_ARMOR: ['ARMORSMITH','FORGE_ARMOR'], ARMORSMITH: ['ARMORSMITH'],
-    FORGE_FURNITURE: ['BLACKSMITH','FORGE_FURNITURE'], BLACKSMITH: ['BLACKSMITH'],
-    METALCRAFT: ['METAL_CRAFT'], PROCESSPLANTS: ['PROCESS_PLANT'],
-  };
-  const skillToLaborId = (skillName) => {
-    if (laborByName[skillName] != null) return laborByName[skillName];
-    for (const alias of ALIAS[skillName] || []) {
-      if (laborByName[alias] != null) return laborByName[alias];
-    }
-    return null;
-  };
-  state.pending.labors = []; // start with a clean slate so successive Optimize runs aren't additive
+  const lines = [];
   for (const role of state.roles) {
-    const ranked = state.units.map(u => ({ u, s: roleScore(u, role.id) }))
-      .sort((a, b) => b.s - a.s).slice(0, N);
-    const top = new Set(ranked.map(x => x.u.id));
-    // Resolve labor IDs from role.skills, accepting both the new {names: [...]}
-    // and legacy {name: '...'} shapes.
-    const laborIds = (role.skills || []).flatMap(s => {
-      const candidates = s.names || (s.name ? [s.name] : []);
-      for (const n of candidates) { const lid = skillToLaborId(n); if (lid != null) return [lid]; }
-      return [];
-    });
-    if (!laborIds.length) continue;
-    for (const u of state.units) {
-      const enable = top.has(u.id);
-      for (const lid of laborIds) {
-        if (u.labors[lid] !== enable) queueLabor(u.id, lid, enable);
-      }
+    const ranked = state.units
+      .map(u => ({ u, s: roleScore(u, role.id) }))
+      .sort((a, b) => b.s - a.s)
+      .slice(0, N)
+      .filter(x => x.s > 0);
+    if (!ranked.length) continue;
+    lines.push(`<strong style="color:var(--gold)">${esc(role.id)}</strong>`);
+    for (const r of ranked) {
+      lines.push(`  ${r.s.toString().padStart(3)}  ${esc(r.u.name)}${r.u.profession ? ' · ' + esc(r.u.profession) : ''}`);
     }
+    lines.push('');
   }
-  refreshPendingUI();
-  render();
-  statusMsg(`Optimizer staged ${pendingTotal()} change(s) — review the Pending Changes dock and press Commit to apply.`);
+  showModal('Recommended assignments (top ' + N + ' per role)',
+    `<p style="font-size:11px;color:var(--fg-dim);margin-bottom:0.5rem;line-height:1.4">
+       Apply these in DF's <em>Labor</em> menu by editing or creating Work Details.
+       The page can't apply them directly — Work Details overwrite per-unit
+       labor flags every tick. Use this as a roster for in-game changes.
+     </p>
+     <pre style="font-size:11px;color:var(--fg);background:#100e08;padding:0.5rem;border:1px solid var(--border);max-height:50vh;overflow:auto;white-space:pre-wrap">${lines.join('\n')}</pre>`);
 }
 
-// ============================================================================
-// Custom professions (browser-side; applied as labor sets)
-// ============================================================================
-
-function refreshCustomProfList() {
-  const div = $('custom-list');
-  div.innerHTML = '';
-  if (!state.customProfessions.length) {
-    div.innerHTML = '<em style="color:var(--fg-dim);font-size:10px;">none yet</em>';
-    return;
-  }
-  for (const cp of state.customProfessions) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<span class="grow" style="color:var(--fg)">${esc(cp.name)}</span>
-      <button class="btn-sm" data-act="apply">apply</button>
-      <button class="btn-sm" data-act="del" style="color:var(--bad);border-color:var(--bad)">×</button>`;
-    row.querySelector('[data-act="apply"]').onclick = () => applyCustomProf(cp);
-    row.querySelector('[data-act="del"]').onclick = () => {
-      state.customProfessions = state.customProfessions.filter(x => x !== cp);
-      saveUI(); refreshCustomProfList();
-    };
-    div.appendChild(row);
-  }
-}
-
-function saveCustomFromSelection() {
-  const u = state.units.find(x => x.id === state.selectedUnitId);
-  if (!u) { alert('Select a dwarf row first.'); return; }
-  const name = $('custom-name').value.trim();
-  if (!name) { alert('Enter a name.'); return; }
-  const labors = [];
-  for (let i = 0; i < u.labors.length; i++) if (u.labors[i]) labors.push(i);
-  state.customProfessions.push({ name, labors });
-  $('custom-name').value = '';
-  saveUI(); refreshCustomProfList();
-}
-
-function applyCustomProf(cp) {
-  if (!state.selectedUnitId) { alert('Select a dwarf row first.'); return; }
-  const u = state.units.find(x => x.id === state.selectedUnitId);
-  if (!u) return;
-  const want = new Set(cp.labors);
-  for (let i = 0; i < u.labors.length; i++) {
-    const desired = want.has(i);
-    if (u.labors[i] !== desired) queueLabor(u.id, i, desired);
-  }
-  queueCustomProf(u.id, cp.name);
-  render();
+function showModal(title, html) {
+  let bg = $('therapist-modal');
+  if (!bg) {
+    bg = document.createElement('div');
+    bg.id = 'therapist-modal';
+    bg.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:99';
+    bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+    document.body.appendChild(bg);
+  } else { bg.innerHTML = ''; bg.style.display = 'flex'; }
+  const dlg = document.createElement('div');
+  dlg.style.cssText = 'background:var(--bg-2);color:var(--fg);border:1px solid var(--accent);border-radius:4px;padding:1rem;max-width:600px;max-height:80vh;overflow:auto;font-family:monospace;font-size:12px';
+  dlg.innerHTML = `<h3 style="color:var(--gold);font-size:12px;margin-bottom:0.5rem;letter-spacing:0.08em">${esc(title)}</h3>${html}<div style="text-align:right;margin-top:0.5rem"><button class="btn">Close</button></div>`;
+  dlg.querySelector('button').onclick = () => bg.remove();
+  bg.appendChild(dlg);
 }
 
 // ============================================================================
@@ -1135,15 +1046,16 @@ function renderUnitRow(u, cols) {
       }
     } else if (c.id.startsWith('labor:')) {
       const lid = +c.id.slice(6);
-      const pendingIdx = findPendingLabor(u.id, lid);
-      const pendingState = pendingIdx >= 0 ? state.pending.labors[pendingIdx].enabled : null;
-      const on = pendingState ?? u.labors[lid];
+      const on = u.labors[lid];
       td.classList.add('lab-cell', on ? 'lab-on' : 'lab-off');
-      if (pendingState != null) td.classList.add('pending');
+      td.style.cursor = 'help';
       const r = u.skills.find(s => s.id === skillIdForLabor(lid));
       td.textContent = on ? (r && r.rating > 0 ? r.rating : '✓') : '';
-      td.title = state.enums.labor[lid];
-      td.onclick = (e) => { e.stopPropagation(); applyLaborImmediate(u, lid, !on); };
+      const labor = state.enums.labor[lid] || ('labor ' + lid);
+      const wds = (state.wdByUnitLabor[u.id] && state.wdByUnitLabor[u.id][lid]) || [];
+      td.title = wds.length
+        ? `${labor}\nControlled by Work Detail: ${wds.join(', ')}\nRead-only — change in DF's Labor menu.`
+        : `${labor}\nNot controlled by any Work Detail (default).\nRead-only — change in DF's Labor menu.`;
     } else if (c.id.startsWith('skill:')) {
       const sid = +c.id.slice(6);
       const r = u.skills.find(s => s.id === sid);
@@ -1352,7 +1264,6 @@ renderViewTabs();
 rebuildGroupOptions();
 rebuildSortOptions();
 $('filter').value = state.filter;
-refreshCustomProfList();
 refreshPendingUI();
 reload();
 </script>

@@ -424,6 +424,39 @@ local function build_doc()
         end
     end
 
+    -- Work Details snapshot. DF 53.x's Work Details system reasserts each
+    -- unit's status.labors[] from these every tick — so the page can read
+    -- the labor flags but cannot meaningfully *toggle* them; the next tick
+    -- overwrites whatever we wrote. We expose the WD list so the UI can
+    -- annotate each labor cell with the controlling detail and explain why
+    -- in-page edits don't stick.
+    local work_details = {}
+    local wds = try(function() return df.global.plotinfo.labor_info.work_details end, nil)
+    if wds then
+        for i = 0, #wds - 1 do
+            local wd = wds[i]
+            local rec = {
+                idx    = i,
+                name   = df2utf(try(function() return wd.name end, '') or ''),
+                icon   = try(function() return wd.icon end, 0) or 0,
+                labors = {},   -- list of labor IDs whose allowed_labors[id] is true
+                units  = {},   -- list of assigned unit IDs
+                flags  = {},   -- bit flags as a {name=true} map (best-effort)
+            }
+            local al = try(function() return wd.allowed_labors end, nil)
+            if al then for j = 0, last_labor do if al[j] then rec.labors[#rec.labors + 1] = j end end end
+            local au = try(function() return wd.assigned_units end, nil)
+            if au then for _, uid in ipairs(au) do rec.units[#rec.units + 1] = uid end end
+            local fl = try(function() return wd.flags end, nil)
+            if fl then
+                for k, v in pairs(fl) do
+                    if type(k) == 'string' and not k:match('^_') then rec.flags[k] = v and true or false end
+                end
+            end
+            work_details[#work_details + 1] = rec
+        end
+    end
+
     return {
         year    = try(function() return df.global.cur_year end, 0) or 0,
         version = {
@@ -433,7 +466,8 @@ local function build_doc()
         enums   = enums,
         roles   = roles(),
         units   = units,
-        unit_errors = errors,
+        work_details = work_details,
+        unit_errors  = errors,
     }
 end
 
