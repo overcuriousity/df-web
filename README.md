@@ -1,6 +1,6 @@
 # df-web
 
-Play Dwarf Fortress Classic in a browser with session persistence, multi-user support, and three auth methods.
+Play Dwarf Fortress Classic in a browser with session persistence, multi-user support, three auth methods, and an in-browser storyteller sidebar (journal, live announcements, legends viewer, optional DFHack labor panel).
 
 > **Dwarf Fortress is the work of [Bay 12 Games](https://www.bay12games.com/dwarves/).**
 > If you enjoy this wrapper, please buy the game on Steam or
@@ -10,19 +10,23 @@ Play Dwarf Fortress Classic in a browser with session persistence, multi-user su
 ## Features
 
 - **SDL render mode** — full graphics via noVNC (tilesets, mouse support).
-- **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC (shown only when configured).
-- **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. The wrapper does not trigger in-game saves — save in DF yourself; on idle timeout the container is stopped and only your last in-game save is preserved.
+- **Audio streaming** — DF's PulseAudio output is piped to the browser as Opus/WebM, started/stopped from the in-game sidebar.
+- **Three auth methods** — string-key form, WebAuthn passkey/YubiKey, or OIDC SSO (each shown only when configured).
+- **Session persistence** — saves survive browser closes; the game process stays alive between disconnects. The wrapper does not trigger in-game saves — save in DF yourself; on idle timeout or explicit stop, the container is stopped and only your last in-game save is preserved.
 - **Idle warning + keepalive** — `/play` shows a live "time until disconnect" chip and pops a warning dialog with a one-click "keep playing" button before the idle reaper fires, giving you time to save in-game.
-- **Hot save snapshot** — `/account` has a "Snapshot saves" button that downloads a tar.gz of the user's save dir without stopping the running game container, alongside the existing stop-and-export flow.
+- **Stop on logout / explicit stop** — logging out or clicking *Stop session* shuts down the user's container. Same flow as idle timeout: only your last in-game save survives.
+- **Hot save snapshot + import** — `/account` has a "Snapshot saves" button that downloads a tar.gz of the user's save dir without stopping the running game container, plus a "Stop and export" flow and an "Import saves" upload (tar.gz of region directories).
 - **Per-user isolation** — each player gets their own save directory; containers share no state.
-- **DoS protection** — configurable concurrent session cap and per-container CPU/memory limits.
-- **Admin-managed tilesets** — baked into the container image; no remote filesystem access for players.
+- **DoS protection** — configurable concurrent session cap and per-container CPU/memory/PID limits.
+- **Per-user tilesets** — users can upload their own PNG tilesets at `/account` (validated, size- and count-limited) and choose an active one; applied at container spawn. Operators can still bake tilesets into the image as the default.
 - **Storyteller sidebar** — per-fortress markdown journal, live announcement feed (gamelog.txt), legends XML viewer. Always available, no third-party tools required.
-- **DFHack integration** (optional) — in-game `manipulator` labor screen + in-browser labor panel. Opt-in at build time; vanilla DF works without it.
+- **DFHack integration** (optional) — when the image is built with DFHack, the in-game `manipulator` labor screen autoloads and a "Dwarves" tab appears in the `/play` sidebar with a labor panel backed by `dfhack-run`. Vanilla DF works without it.
+- **Admin web UI** — admins get an `/admin` page to list users, create accounts, rotate access keys, and delete users (which stops the running container and removes the save dir). The admin flag itself is set only via the host-side script — never via the web UI.
 
 ## Prerequisites
 
 - Linux server with Docker ≥ 24 and Docker Compose v2
+- `sqlite3` on the host (used by `provision-user.sh`)
 - [Dwarf Fortress Classic](https://www.bay12games.com/dwarves/) Linux build (not included — see below)
 - A reverse proxy (nginx, Caddy, etc.) in front handling TLS — this service binds to `127.0.0.1:8080`
 
@@ -60,17 +64,21 @@ sudo install -d -o root -g root -m 0755 /srv/df/users
 
 > **Important:** always create this on the host directly, never via `docker exec` or `docker compose exec`. Commands run inside the session-manager container operate inside that container's filesystem; even with the bind-mount, getting the paths and ownership right is fragile that way.
 
-### 4. Provision users
+### 4. Provision the bootstrap admin and any initial users
+
+User records live in `session-manager/users.db` (SQLite). The provisioning script creates the on-disk directories, inserts the row, and prints the raw access key.
 
 ```bash
-cp session-manager/users.yml.example session-manager/users.yml
+# Bootstrap admin (gets the is_admin flag — needed to use /admin).
+sudo ./scripts/provision-user.sh --admin alice "Alice"
 
-# Creates /srv/df/users/<uid>/{data,config}/, appends the entry to users.yml, and prints the access key.
-# Run on the host (not inside any container).
-sudo ./scripts/provision-user.sh alice "Alice"
-
-# Share the printed access key with the user out-of-band (treat it like a password)
+# Regular users.
+sudo ./scripts/provision-user.sh bob "Bob"
 ```
+
+Share each printed access key with the user out-of-band; treat it like a password. Subsequent users can also be created from the admin UI once the bootstrap admin can log in.
+
+Changes take effect immediately — no daemon reload required.
 
 ### 5. Build images
 
@@ -132,54 +140,69 @@ Use `--no-cache` whenever Dockerfiles change (including base image layers). Runn
 | `rp_id` | — | WebAuthn relying party hostname, e.g. `df.example.com` |
 | `rp_display_name` | — | Human name shown in passkey dialogs |
 | `rp_origins` | — | List of allowed WebAuthn origins, e.g. `["https://df.example.com"]` |
-| `oidc_issuer` | — | Nextcloud base URL, e.g. `https://cloud.example.com` |
-| `oidc_client_id` | — | OIDC client ID from Nextcloud |
+| `oidc_issuer` | — | Issuer base URL (e.g. Nextcloud `https://cloud.example.com`); leave blank to disable OIDC |
+| `oidc_client_id` | — | OIDC client ID |
 | `oidc_client_secret` | — | OIDC client secret |
 | `oidc_redirect_uri` | — | Callback URL, e.g. `https://df.example.com/auth/oidc/callback` |
 | `dfhack_enabled` | `false` | Set `true` only when `df-image-sdl` was built with `--build-arg DFHACK_VERSION=…`. Enables the web labor panel and manipulator hint. |
+| `insecure_cookie` | `false` | Set `true` only for HTTP-only local development; never in production |
 
 ## User Management
 
-`session-manager/users.yml` is the allowlist. Only users listed here can log in.
+User accounts live in `session-manager/users.db` (SQLite). There are two ways to manage them: the host-side `provision-user.sh` script and the admin web UI. Both write to the same database; changes take effect immediately, no daemon reload required.
 
-```yaml
-- uid: "alice"
-  display_name: "Alice"
-  token_hash: "<hex SHA-256 of the raw access key>"  # from provision-user.sh
-  oidc_sub: ""       # OIDC subject claim — leave blank if not using OIDC
-  passkeys: []       # populated automatically when user self-enrolls at /account
-```
+### Host-side script (`scripts/provision-user.sh`)
 
-To add a user: run `scripts/provision-user.sh <uid> "Display Name"` — it appends the entry to `users.yml` and prints the access key.
-
-To rotate a forgotten/leaked key: run `scripts/provision-user.sh --rotate <uid>` — it replaces only the `token_hash` (passkeys and `oidc_sub` are preserved) and prints a fresh key. Then reload the session manager so the new hash takes effect:
+Required for anything that grants persistent privilege (the admin flag) — the web UI deliberately can't promote, demote, or create admins, so a compromised admin session can't escalate or hand out admin permanently.
 
 ```bash
-docker compose kill -s SIGHUP session-manager
+# Create a regular user (prints the raw access key).
+sudo ./scripts/provision-user.sh <uid> "Display Name"
+
+# Create the bootstrap admin.
+sudo ./scripts/provision-user.sh --admin <uid> "Display Name"
+
+# Rotate a forgotten/leaked key (preserves passkeys, oidc_sub, display_name).
+sudo ./scripts/provision-user.sh --rotate <uid>
+
+# Toggle admin on an existing user.
+sudo ./scripts/provision-user.sh --promote <uid>
+sudo ./scripts/provision-user.sh --demote <uid>
 ```
 
-`SIGHUP` re-reads `users.yml` without bouncing live game sessions; use `docker compose restart session-manager` if you'd rather force everyone to re-auth.
+UIDs must be 1-32 chars, lowercase alphanumeric / underscore / dash, starting alphanumeric (they become container names, filesystem paths, and SQL values).
 
-To revoke access: remove or comment out the entry, then send `SIGHUP` (or restart) as above.
+### Admin web UI (`/admin`)
+
+Available to any user whose row has `is_admin = 1`. From the page, an admin can:
+
+- List all users (with their auth methods and whether they currently have an active container)
+- Create a new regular user (no admin flag — script-only)
+- Rotate any user's access key
+- Delete a user — stops their running container, drops the DB row, and removes their save directory
+
+You cannot delete your own account from the UI.
 
 ### Auth methods
 
-**String-key** — the default. The user pastes their access key into the form on `/`. The key is hashed (SHA-256) before comparison; the hash is what's stored in `users.yml`. Treat the raw key like a password.
+**String-key** — the default. The user pastes their access key into the form on `/`. The key is hashed (SHA-256) before comparison; the hash is what's stored in `users.db`. Treat the raw key like a password.
 
 **Passkey / YubiKey** — self-enrollment flow:
 1. User logs in once with their string-key.
 2. User visits `/account` and clicks "Register a passkey or security key".
 3. Browser/OS guides through the WebAuthn ceremony (platform authenticator, YubiKey, etc.).
-4. `users.yml` is updated automatically with the new credential.
+4. The credential is stored in `users.db` automatically.
 5. On future visits the user clicks "Login with Passkey / YubiKey" on the login page — no key entry needed.
 
-**OIDC (single sign-on)** — set `oidc_issuer`, `oidc_client_id`, `oidc_client_secret`, and `oidc_redirect_uri` in `config.yml`. The SSO button appears on the login page automatically when `oidc_issuer` is non-empty. Pre-create users in `users.yml` with their `oidc_sub` claim populated.
+**OIDC (single sign-on)** — set `oidc_issuer`, `oidc_client_id`, `oidc_client_secret`, and `oidc_redirect_uri` in `config.yml`. The SSO button appears on the login page automatically when `oidc_issuer` is non-empty. Pre-create users with the `provision-user.sh` script, then have an admin populate the user's `oidc_sub` claim from the admin UI or directly in the DB.
 
-**Session cookie** — the `dfsess` cookie is HMAC-SHA-256 signed with `cookie_key`. It is not encrypted; the UID is readable in the cookie value. Set `insecure_cookie: true` only for HTTP-only local development; never in production.
+**Session cookie** — the `dfsess` cookie is HMAC-SHA-256 signed with `cookie_key`. It is not encrypted; the UID is readable in the cookie value. Do not set `insecure_cookie: true` in production.
 
 ## Tilesets
 
-Place tileset PNG files in `df-image-base/tilesets/` and add `sed` lines to `df-image-base/Dockerfile` to apply them, then rebuild:
+Two paths, used together if you want:
+
+**Operator-baked default.** Place tileset PNGs in `df-image-base/tilesets/` and add `sed` lines to `df-image-base/Dockerfile` to apply them, then rebuild. This sets the default font for everyone.
 
 ```dockerfile
 # in df-image-base/Dockerfile, after the existing sed block:
@@ -192,30 +215,69 @@ docker build -t df-image-base ./df-image-base
 docker build -t df-image-sdl  ./df-image-sdl
 ```
 
+**Per-user upload.** Each user can upload their own PNG tilesets at `/account` (max 4 MiB per file, 20 files per user, PNG signature checked, filenames restricted to a safe charset) and pick one as their active tileset. The selection is recorded on the user row; the spawn-time `apply-tilesets.sh` hook copies the user's tilesets into `data/art/` and patches `init.txt` before DF starts.
+
+## Storyteller sidebar
+
+Always available in `/play`, no DFHack required:
+
+- **Journal** — per-fortress markdown notes, persisted in the user's save directory.
+- **Announcements** — live tail of `gamelog.txt` from the running container.
+- **Legends** — a list of exported worlds and an in-browser legends-XML viewer at `/legends` (use DF's "Export legends" first; the wrapper does not trigger exports).
+
+## DFHack integration (optional)
+
+DFHack is downloaded at image build time when `--build-arg DFHACK_VERSION=<ver>` is passed and is not redistributed by this repo. When enabled (config: `dfhack_enabled: true`), the SDL container:
+
+- Autoloads `enable manipulator` (in-game Therapist-style labor screen) via `dfhack-config/init/dfhack.init`.
+- Exposes the DFHack remote API on port 5000 inside the Docker network.
+- Ships two Lua scripts in `df-image-sdl/hack/scripts/`:
+  - `web-units.lua` — emits a JSON list of dwarves with their current labor flags
+  - `web-setlabor.lua` — toggles a single labor on a single dwarf
+
+The session-manager talks to DFHack with `docker exec <user-container> dfhack-run …` (`session-manager/dfhack_proxy.go`) and exposes:
+
+- `GET /play/dfhack/units`
+- `POST /play/dfhack/labor` (`{unit_id, labor, enabled}`)
+
+The `/play` page shows a "Dwarves" sidebar tab when `/session/capabilities` reports DFHack is on, with a labor-checkbox grid that calls those endpoints.
+
 ## Architecture
 
 ```
 Browser → (your TLS reverse proxy) → 127.0.0.1:8080
                                            │
                                     Session Manager (Go)
-                                    ├─ /             login page
-                                    ├─ /account      passkey self-enrollment
-                                    ├─ /auth/token   string-key → cookie
-                                    ├─ /auth/passkey/* WebAuthn
-                                    ├─ /auth/oidc/*  OIDC (when configured)
-                                    └─ /play         websocket proxy → container
+                                    ├─ /                    login page
+                                    ├─ /account             passkey enrol, snapshot, export, import, tilesets
+                                    ├─ /admin               admin UI (admins only)
+                                    ├─ /auth/token          string-key → cookie
+                                    ├─ /auth/passkey/*      WebAuthn
+                                    ├─ /auth/oidc/*         OIDC (when configured)
+                                    ├─ /auth/logout         clears cookie + stops user's container
+                                    ├─ /play                websocket proxy → container (noVNC)
+                                    ├─ /play/audio          audio stream from container
+                                    ├─ /play/journal        per-fortress markdown notes
+                                    ├─ /play/timeline       live gamelog.txt tail
+                                    ├─ /play/legends, /legends   legends XML viewer
+                                    ├─ /play/dfhack/*       (when dfhack_enabled)
+                                    ├─ /session/status      idle countdown
+                                    ├─ /session/keepalive   reset idle timer
+                                    ├─ /session/stop        explicit stop
+                                    └─ /session/capabilities feature-flag probe for the frontend
                                            │
-                                     SDL container
-                                     Xvfb + x11vnc
-                                     websockify + noVNC
-                                     DF (SDL2)
-                                     DFHack (optional)
+                                     SDL container (per user, on demand)
+                                     ├─ Xvfb + x11vnc + websockify + noVNC
+                                     ├─ PulseAudio + ffmpeg → /play/audio
+                                     ├─ DF (SDL2)
+                                     └─ DFHack (optional, port 5000 internal)
 ```
 
 Each game container:
-- Is started on demand, stopped after `idle_timeout` of inactivity
+
+- Is started on demand, stopped after `idle_timeout` of inactivity, on explicit stop, or on logout
 - Has its own bind-mounted save + config directories under `/srv/df/users/<uid>/`:
-  - `data/`   → `~/.local/share/Bay 12 Games/Dwarf Fortress/` (saves, world data)
+  - `data/`   → `~/.local/share/Bay 12 Games/Dwarf Fortress/` (saves, world data, gamelog.txt)
   - `config/` → `~/.config/Bay 12 Games/Dwarf Fortress/` (keybindings, init customisations)
 - Is attached only to the internal Docker network (no internet egress)
 - Is limited to 1 CPU / 4 GB RAM / 256 PIDs (DF worldgen on medium worlds can spike past 2 GB)
