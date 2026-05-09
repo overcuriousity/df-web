@@ -388,6 +388,13 @@ async function reload() {
       statusMsg('DFHack unavailable: ' + (await r.text()), 'var(--bad)'); return;
     }
     const doc = await r.json();
+    if (doc.error) {
+      // Lua-side build failure surfaced in-band so the page still loads.
+      statusMsg('Lua error in web-units-full: ' + doc.error, 'var(--bad)');
+    } else if (doc.unit_errors && doc.unit_errors.length) {
+      statusMsg(`OK — ${doc.unit_errors.length} unit(s) had partial-data errors (see console)`, 'var(--warn)');
+      console.warn('per-unit build errors:', doc.unit_errors);
+    }
     state.year = doc.year || 0;
     state.version = doc.version || {};
     state.enums = doc.enums || {};

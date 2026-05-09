@@ -30,13 +30,16 @@ end
 
 local function dump_enum(e)
     -- Returns a {[index]=name} map for index in [_first_item, _last_item].
+    -- Fully pcall-protected: any unexpected enum shape (missing markers,
+    -- userdata that doesn't tostring) yields {} instead of aborting the
+    -- whole script.
     local t = {}
     if not e then return t end
-    local first, last = e._first_item, e._last_item
-    if not first or not last then return t end
+    local ok, first, last = pcall(function() return e._first_item, e._last_item end)
+    if not ok or type(first) ~= 'number' or type(last) ~= 'number' then return t end
     for i = first, last do
-        local v = e[i]
-        if v ~= nil then t[tostring(i)] = tostring(v) end
+        local ok2, v = pcall(function() return e[i] end)
+        if ok2 and v ~= nil then t[tostring(i)] = tostring(v) end
     end
     return t
 end
@@ -45,10 +48,11 @@ local function dump_enum_array(e)
     -- Same data as dump_enum but emitted as a dense array indexed from 0.
     local t = {}
     if not e then return t end
-    local first, last = e._first_item, e._last_item
-    if not first or not last then return t end
+    local ok, first, last = pcall(function() return e._first_item, e._last_item end)
+    if not ok or type(first) ~= 'number' or type(last) ~= 'number' then return t end
     for i = first, last do
-        t[#t + 1] = tostring(e[i] or i)
+        local ok2, v = pcall(function() return e[i] end)
+        t[#t + 1] = (ok2 and v ~= nil) and tostring(v) or tostring(i)
     end
     return t
 end
@@ -329,24 +333,31 @@ end
 
 -- ---------------------------------------------------------------------------
 -- main
+--
+-- Wrapped in a top-level pcall: any structural surprise on a future DF/DFHack
+-- patch becomes an in-band {error: "..."} JSON document instead of a script
+-- abort that surfaces in the proxy as the bare locale warning from glibc and
+-- the unhelpful 503. The browser already handles a doc with units = [].
 -- ---------------------------------------------------------------------------
 
-local last_labor = df.unit_labor._last_item
+local function build_doc()
+    local last_labor = try(function() return df.unit_labor._last_item end, 0) or 0
 
-local enums = {
-    labor       = dump_enum(df.unit_labor),
-    skill       = dump_enum(df.job_skill),
-    attr_phys   = dump_enum_array(df.physical_attribute_type),
-    attr_ment   = dump_enum_array(df.mental_attribute_type),
-    trait       = dump_enum(df.personality_facet_type),
-    need        = dump_enum(df.need_type),
-}
+    local enums = {
+        labor       = dump_enum(df.unit_labor),
+        skill       = dump_enum(df.job_skill),
+        attr_phys   = dump_enum_array(df.physical_attribute_type),
+        attr_ment   = dump_enum_array(df.mental_attribute_type),
+        trait       = dump_enum(df.personality_facet_type),
+        need        = dump_enum(df.need_type),
+    }
 
-local units = {}
-for _, u in ipairs(df.global.world.units.active) do
-    if dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) then
-        local skills = unit_skills(u)
-        local phys, ment = unit_attrs(u)
+    local function build_unit(u)
+        local skills = try(function() return unit_skills(u) end, {}) or {}
+        local phys, ment = {}, {}
+        local ok_attrs, p, m = pcall(unit_attrs, u)
+        if ok_attrs then phys, ment = p or {}, m or {} end
+
         local stress = try(function() return u.status.current_soul.personality.stress end, nil)
         local nick = df2utf(try(function() return u.name.nickname end, '') or '')
         local first = df2utf(try(function() return u.name.first_name end, '') or '')
@@ -360,17 +371,17 @@ for _, u in ipairs(df.global.world.units.active) do
             return r and r.caste[u.caste].caste_id or ''
         end, '') or '')
 
-        units[#units + 1] = {
+        return {
             id                = u.id,
             hist_id           = try(function() return u.hist_figure_id end, -1) or -1,
-            name              = df2utf(dfhack.units.getReadableName(u)),
+            name              = df2utf(try(function() return dfhack.units.getReadableName(u) end, '') or ''),
             first_name        = first,
             nickname          = nick,
-            profession        = df2utf(dfhack.units.getProfessionName(u)),
+            profession        = df2utf(try(function() return dfhack.units.getProfessionName(u) end, '') or ''),
             custom_profession = custom_prof,
             race              = race_name,
             caste             = caste_name,
-            birth_year        = u.birth_year or 0,
+            birth_year        = try(function() return u.birth_year end, 0) or 0,
             arrived_year      = arrived_year(u),
             wave              = migration_wave(u, df.global.cur_year),
             current_job       = df2utf(current_job_name(u)),
@@ -381,25 +392,51 @@ for _, u in ipairs(df.global.world.units.active) do
             phys_attrs        = phys,
             ment_attrs        = ment,
             skills            = skills,
-            labors            = unit_labors(u, last_labor),
-            traits            = unit_traits(u),
-            preferences       = unit_prefs(u),
-            needs             = unit_needs(u),
-            health            = unit_health(u),
-            squad             = unit_squad(u),
+            labors            = try(function() return unit_labors(u, last_labor) end, {}) or {},
+            traits            = try(function() return unit_traits(u) end, {}) or {},
+            preferences       = try(function() return unit_prefs(u) end, {}) or {},
+            needs             = try(function() return unit_needs(u) end, {}) or {},
+            health            = try(function() return unit_health(u) end, {}) or {},
+            squad             = try(function() return unit_squad(u) end, { id = -1, name = '' }) or { id = -1, name = '' },
         }
     end
+
+    local units = {}
+    local errors = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        local ok_filter, is_cz = pcall(function() return dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) end)
+        if ok_filter and is_cz then
+            local ok, unit_or_err = pcall(build_unit, u)
+            if ok then
+                units[#units + 1] = unit_or_err
+            else
+                errors[#errors + 1] = { id = (try(function() return u.id end, -1) or -1), reason = tostring(unit_or_err) }
+            end
+        end
+    end
+
+    return {
+        year    = try(function() return df.global.cur_year end, 0) or 0,
+        version = {
+            df     = try(function() return dfhack.getDFVersion() end, '') or '',
+            dfhack = try(function() return dfhack.getDFHackVersion() end, '') or '',
+        },
+        enums   = enums,
+        roles   = roles(),
+        units   = units,
+        unit_errors = errors,
+    }
 end
 
-local doc = {
-    year    = df.global.cur_year,
-    version = {
-        df     = try(function() return dfhack.getDFVersion() end, '') or '',
-        dfhack = try(function() return dfhack.getDFHackVersion() end, '') or '',
-    },
-    enums   = enums,
-    roles   = roles(),
-    units   = units,
-}
-
-print(json.encode(doc))
+local ok, doc = pcall(build_doc)
+if ok then
+    print(json.encode(doc))
+else
+    print(json.encode({
+        error = tostring(doc),
+        year  = 0,
+        enums = { labor = {}, skill = {}, attr_phys = {}, attr_ment = {}, trait = {}, need = {} },
+        roles = {},
+        units = {},
+    }))
+end
