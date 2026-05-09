@@ -2,6 +2,7 @@ FROM df-image-base AS sdl
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
+    x11-xserver-utils \
     x11vnc \
     websockify \
     novnc \

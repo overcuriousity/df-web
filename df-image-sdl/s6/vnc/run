@@ -1,6 +1,12 @@
 #!/bin/sh
 # Wait for Xvfb to create its socket before starting VNC.
 until [ -S /tmp/.X11-unix/X0 ]; do sleep 0.2; done
+
+# Replace the default X11 root cursor (the "X" glyph from the cursor font) with
+# a normal arrow. Without this, anywhere DF's SDL window doesn't claim its own
+# cursor the user sees the X-shape, which makes targeting GUI elements hard.
+DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null || true
+
 exec x11vnc \
     -display :0 \
     -forever \
