@@ -13,10 +13,6 @@ local function try(f, default)
 end
 
 local function age_tier(u)
-    if u.flags1.tame == false and u.flags1.was_tame == false then
-        -- still leave wild creatures filtered out below; this branch
-        -- exists only to make intent clear.
-    end
     if try(function() return u.profession == df.profession.BABY end, false) then return 'baby' end
     if try(function() return u.profession == df.profession.CHILD end, false) then return 'child' end
     return 'adult'
@@ -43,10 +39,6 @@ local function caste_name(u)
         local r = df.global.world.raws.creatures.all[u.race]
         return r and r.caste[u.caste].caste_id or ''
     end, '') or '')
-end
-
-local function in_cage(u)
-    return try(function() return u.flags1.caged or u.general_refs and false end, false) or false
 end
 
 local result = {}

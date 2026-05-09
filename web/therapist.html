@@ -283,7 +283,7 @@ const VIEWS = [
 const GROUPS = [
   { id: 'none',       label: 'No grouping',     fn: (_u) => '' },
   { id: 'profession', label: 'Profession',      fn: u => u.profession || '(none)' },
-  { id: 'wave',       label: 'Migration Wave',  fn: u => 'Wave ' + (u.wave || 0) },
+  { id: 'wave',       label: 'Arrival Year',    fn: u => 'Year ' + (u.wave || 0) },
   { id: 'caste',      label: 'Caste / Sex',     fn: u => u.caste || '(?)' },
   { id: 'happiness',  label: 'Happiness',       fn: u => u.happiness || 'Unknown' },
   { id: 'legendary',  label: 'Legendary',       fn: u => u.legendary ? 'Legendary' : 'Mortal' },
@@ -294,7 +294,8 @@ const GROUPS = [
 
 function bucket10(n) { return Math.floor(n / 10) * 10 + '-' + (Math.floor(n/10)*10 + 9); }
 
-const STRESS_BUCKETS = ['Ecstatic','Happy','Content','Fine','Unhappy','VeryUnhappy','Miserable'];
+const STRESS_BUCKETS = ['Ecstatic','Happy','Content','Fine','Unhappy','Very Unhappy','Miserable'];
+function happyClass(h) { return 'h-' + (h || 'Unknown').replace(/\s+/g, ''); }
 
 const SKILL_LEVELS = [
   // DT-style descriptors; rating index → name + tier color class.
@@ -329,7 +330,7 @@ const state = {
   sort: { col: 'name', dir: 1 },
   filter: '',
   selectedUnitId: null,
-  pending: { labors: [], nicknames: [], custom_profession: [] },
+  pending: { nicknames: [], custom_profession: [] },
   collapsedGroups: new Set(),
   ui: { docks: {}, autoRefresh: false },
   laborTranches: [],
@@ -487,7 +488,6 @@ function applyFilters(units) {
   }
   if ($('show-pending-only')?.checked) {
     const pendingIds = new Set([
-      ...state.pending.labors.map(p => p.unit_id),
       ...state.pending.nicknames.map(p => p.unit_id),
       ...state.pending.custom_profession.map(p => p.unit_id),
     ]);
@@ -647,7 +647,7 @@ function queueCustomProf(unit_id, name) {
 }
 
 function pendingTotal() {
-  return state.pending.labors.length + state.pending.nicknames.length + state.pending.custom_profession.length;
+  return state.pending.nicknames.length + state.pending.custom_profession.length;
 }
 
 function refreshPendingUI() {
@@ -658,11 +658,6 @@ function refreshPendingUI() {
   const ul = $('pending-list');
   ul.innerHTML = '';
   const nameOf = (id) => (state.units.find(u => u.id === id) || {}).name || ('#' + id);
-  for (const p of state.pending.labors) {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="who">${esc(nameOf(p.unit_id))}</span><span class="what">${esc(state.enums.labor[p.labor] || ('lab '+p.labor))} ${p.enabled ? '✓' : '✗'}</span>`;
-    ul.appendChild(li);
-  }
   for (const p of state.pending.nicknames) {
     const li = document.createElement('li');
     li.innerHTML = `<span class="who">${esc(nameOf(p.unit_id))}</span><span class="what">nick "${esc(p.nickname)}"</span>`;
@@ -676,7 +671,7 @@ function refreshPendingUI() {
 }
 
 function clearPending() {
-  state.pending = { labors: [], nicknames: [], custom_profession: [] };
+  state.pending = { nicknames: [], custom_profession: [] };
   refreshPendingUI();
   render();
 }
@@ -1033,7 +1028,7 @@ function renderUnitRow(u, cols) {
       td.textContent = u.current_job || '';
     } else if (c.id === 'age') td.textContent = u.age || '';
     else if (c.id === 'happy') {
-      td.classList.add('happy', 'h-' + (u.happiness || 'Unknown'));
+      td.classList.add('happy', happyClass(u.happiness));
       td.textContent = (u.happiness || '?').slice(0, 4);
       td.title = u.happiness + ' (stress ' + (u.stress ?? '?') + ')';
     } else if (c.id === 'totlabors') {

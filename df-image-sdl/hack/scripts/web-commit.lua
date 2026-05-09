@@ -1,8 +1,7 @@
 -- web-commit: apply a batch of pending changes from /therapist.
 -- Invoked via: dfhack-run web-commit <hex-encoded JSON>
 -- Payload shape (every key optional):
---   { "labors":[{"unit_id":N,"labor":I,"enabled":bool}, ...],
---     "nicknames":[{"unit_id":N,"nickname":"..."}, ...],
+--   { "nicknames":[{"unit_id":N,"nickname":"..."}, ...],
 --     "custom_profession":[{"unit_id":N,"name":"..."}, ...] }
 -- Output: JSON {"applied":N, "errors":[{"kind":"...","unit_id":N,"reason":"..."}, ...]}.
 --
@@ -33,21 +32,6 @@ local errors  = {}
 
 local function err(kind, unit_id, reason)
     errors[#errors + 1] = { kind = kind, unit_id = unit_id, reason = reason }
-end
-
-local last_labor = df.unit_labor._last_item
-
--- ---- labors ---------------------------------------------------------------
-for _, c in ipairs(payload.labors or {}) do
-    local u = df.unit.find(c.unit_id)
-    if not u then
-        err('labor', c.unit_id, 'unit not found')
-    elseif type(c.labor) ~= 'number' or c.labor < 0 or c.labor > last_labor then
-        err('labor', c.unit_id, 'labor id out of range')
-    else
-        u.status.labors[c.labor] = c.enabled and true or false
-        applied = applied + 1
-    end
 end
 
 -- ---- nicknames ------------------------------------------------------------
