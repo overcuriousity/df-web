@@ -110,7 +110,7 @@
     <input type="file" id="import-file" accept=".zip,.tar.gz,.tgz,application/zip,application/gzip">
     <button class="btn mini" type="button" onclick="importSave()" style="margin:0;width:auto;">Import save</button>
   </div>
-  <p class="hint">Upload a .zip or .tar.gz containing one DF region folder (the folder with <code>world.dat</code> and <code>world.sav</code>). Stop your active session first if one is running. Up to 200&nbsp;MiB.</p>
+  <p class="hint">Upload a .zip or .tar.gz of your DF <code>save/</code> folder (or just one region folder). Stop your active session first if one is running. Up to 200&nbsp;MiB.</p>
   <p id="import-status"></p>
 
   <hr class="divider">
@@ -338,7 +338,8 @@ async function importSave() {
     if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
     const out = await r.json();
     status.className = 'ok';
-    status.textContent = 'Installed as ' + out.region + ' (' + out.files + ' files, ' + Math.round(out.bytes/1024) + ' KiB).';
+    const label = out.regions.join(', ');
+    status.textContent = 'Installed as ' + label + ' (' + out.files + ' files, ' + Math.round(out.bytes/1024) + ' KiB).';
     input.value = '';
   } catch (e) {
     status.className = 'err';

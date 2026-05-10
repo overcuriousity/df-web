@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -27,13 +28,14 @@ const (
 // next free regionN slot.
 var regionDirRe = regexp.MustCompile(`^region(\d+)$`)
 
-// handleAccountImport accepts a zip or tar.gz containing exactly one DF
-// region folder and installs it as a new region under the user's data/save/.
+// handleAccountImport accepts a zip or tar.gz containing either:
+//   - exactly one DF region folder (with world.dat + world.sav), or
+//   - a save/ wrapper directory containing multiple DF save dirs, or
+//   - multiple DF save dirs at the top level.
 //
 // Refuses while the user has a running container (would race DF's open save
-// handles). Validates that the archive contains a single top-level directory
-// with world.dat and world.sav, no path traversal, and an uncompressed total
-// under maxImportExtractBytes.
+// handles). Validates no path traversal, and an uncompressed total under
+// maxImportExtractBytes.
 func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -169,15 +171,15 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		topLevel  string
+		topLevels []string
 		fileCount int
 		byteCount int64
 	)
 	switch format {
 	case "zip":
-		topLevel, fileCount, byteCount, err = extractZip(tmpUploadPath, extractDir)
+		topLevels, fileCount, byteCount, err = extractZip(tmpUploadPath, extractDir)
 	case "tgz":
-		topLevel, fileCount, byteCount, err = extractTarGz(tmpUploadPath, extractDir)
+		topLevels, fileCount, byteCount, err = extractTarGz(tmpUploadPath, extractDir)
 	default:
 		http.Error(w, "unrecognised archive format", http.StatusBadRequest)
 		return
@@ -188,17 +190,53 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the extracted layout: top-level dir must contain world.dat and world.sav.
-	regionSrc := filepath.Join(extractDir, topLevel)
-	if !hasRegionFiles(regionSrc) {
-		http.Error(w, "archive does not look like a DF save (missing world.dat / world.sav)", http.StatusBadRequest)
-		return
+	// Resolve the list of save directories to install. Three supported layouts:
+	//   1. Single dir with world.dat + world.sav → install as one new region.
+	//   2. Single dir without world.dat (e.g. save/) containing DF save dirs → unwrap.
+	//   3. Multiple dirs at the top level → install all DF save dirs found.
+	type saveDir struct {
+		name string // install target name (may differ from src for regionN mapping)
+		src  string // full path in extract staging
+	}
+	var saveDirs []saveDir
+
+	switch {
+	case len(topLevels) == 1 && hasRegionFiles(filepath.Join(extractDir, topLevels[0])):
+		// Layout 1: single complete region (world.dat + world.sav present).
+		saveDirs = []saveDir{{name: topLevels[0], src: filepath.Join(extractDir, topLevels[0])}}
+
+	case len(topLevels) == 1:
+		// Layout 2: single wrapper dir (e.g. save/) — look inside for DF save dirs.
+		wrapperPath := filepath.Join(extractDir, topLevels[0])
+		children, err := dfSaveDirsIn(wrapperPath)
+		if err != nil || len(children) == 0 {
+			http.Error(w, "archive does not look like a DF save (missing world.sav in any subfolder)", http.StatusBadRequest)
+			return
+		}
+		for _, c := range children {
+			saveDirs = append(saveDirs, saveDir{name: c, src: filepath.Join(wrapperPath, c)})
+		}
+
+	default:
+		// Layout 3: multiple top-level dirs — collect those that look like DF saves.
+		for _, tl := range topLevels {
+			p := filepath.Join(extractDir, tl)
+			fi, err := os.Stat(p)
+			if err != nil || !fi.IsDir() {
+				continue
+			}
+			if !hasSaveFile(p) {
+				continue
+			}
+			saveDirs = append(saveDirs, saveDir{name: tl, src: p})
+		}
+		if len(saveDirs) == 0 {
+			http.Error(w, "archive does not look like a DF save (missing world.sav in any folder)", http.StatusBadRequest)
+			return
+		}
 	}
 
-	// Pick the next free regionN slot under data/save/. ensureUserDirs covers
-	// data/, config/, and tilesets/ at 1000:1000; we still need to chown the
-	// save/ subdir explicitly because MkdirAll will create it root-owned for a
-	// brand-new user importing before their first /play.
+	// Ensure the user's save root exists with the right ownership.
 	if err := ensureUserDirs(m.cfg.SavesRoot, uid); err != nil {
 		log.Printf("import: ensureUserDirs for %s: %v", uid, err)
 		http.Error(w, "storage error", http.StatusInternalServerError)
@@ -215,41 +253,60 @@ func (m *Manager) handleAccountImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
-	target, err := nextFreeRegion(saveRoot)
-	if err != nil {
-		log.Printf("import: nextFreeRegion for %s: %v", uid, err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
-		return
-	}
-	targetPath := filepath.Join(saveRoot, target)
 
-	// Move into place. os.Rename works because the staging dir is on the same
-	// filesystem (under cfg.SavesRoot/<uid>/.import-staging).
-	if err := os.Rename(regionSrc, targetPath); err != nil {
-		log.Printf("import: rename %s -> %s: %v", regionSrc, targetPath, err)
-		http.Error(w, "could not install save", http.StatusInternalServerError)
-		return
-	}
-
-	// Match the ownership/permissions used by ensureUserDirs so DF (uid 1000
-	// in-container) can read+write the new region. Treat failure as fatal and
-	// roll back the install: a 200 here would leave the user with a region
-	// they can't actually load.
-	if err := chownTree(targetPath, 1000, 1000); err != nil {
-		log.Printf("import: chown tree %s: %v", targetPath, err)
-		if rmErr := os.RemoveAll(targetPath); rmErr != nil {
-			log.Printf("import: rollback %s after chown failure: %v", targetPath, rmErr)
+	// Install each save dir. regionN dirs get the next free slot; others keep
+	// their name (overwriting any existing save with the same name).
+	var installed []string
+	for _, sd := range saveDirs {
+		var target string
+		if regionDirRe.MatchString(sd.name) {
+			t, err := nextFreeRegion(saveRoot)
+			if err != nil {
+				log.Printf("import: nextFreeRegion for %s: %v", uid, err)
+				http.Error(w, "storage error", http.StatusInternalServerError)
+				return
+			}
+			target = t
+		} else {
+			target = sd.name
 		}
-		http.Error(w, "could not finalise save permissions", http.StatusInternalServerError)
-		return
+		targetPath := filepath.Join(saveRoot, target)
+
+		// Remove any existing save with this name so Rename never hits EEXIST.
+		if err := os.RemoveAll(targetPath); err != nil {
+			log.Printf("import: clear existing %s for %s: %v", target, uid, err)
+			http.Error(w, "could not install save", http.StatusInternalServerError)
+			return
+		}
+
+		// Move into place. os.Rename works because the staging dir is on the same
+		// filesystem (under cfg.SavesRoot/<uid>/.import-staging).
+		if err := os.Rename(sd.src, targetPath); err != nil {
+			log.Printf("import: rename %s -> %s: %v", sd.src, targetPath, err)
+			http.Error(w, "could not install save", http.StatusInternalServerError)
+			return
+		}
+
+		// Match the ownership/permissions used by ensureUserDirs so DF (uid 1000
+		// in-container) can read+write the new region. Roll back on failure.
+		if err := chownTree(targetPath, 1000, 1000); err != nil {
+			log.Printf("import: chown tree %s: %v", targetPath, err)
+			if rmErr := os.RemoveAll(targetPath); rmErr != nil {
+				log.Printf("import: rollback %s after chown failure: %v", targetPath, rmErr)
+			}
+			http.Error(w, "could not finalise save permissions", http.StatusInternalServerError)
+			return
+		}
+
+		installed = append(installed, target)
 	}
 
-	log.Printf("import: %s installed %s (%d files, %d bytes)", uid, target, fileCount, byteCount)
+	log.Printf("import: %s installed %v (%d files, %d bytes)", uid, installed, fileCount, byteCount)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"region": target,
-		"files":  fileCount,
-		"bytes":  byteCount,
+		"regions": installed,
+		"files":   fileCount,
+		"bytes":   byteCount,
 	})
 }
 
@@ -304,8 +361,8 @@ func validateEntryName(name string) (string, error) {
 
 // isMetadataEntry skips noise that filesystem GUIs add to archives — currently
 // macOS Finder's __MACOSX/ resource forks and .DS_Store sentinels. Treating
-// these as if they weren't in the archive lets us still enforce
-// "exactly one top-level region folder" without rejecting macOS-zipped saves.
+// these as if they weren't in the archive lets us still enforce the single
+// top-level region folder without rejecting macOS-zipped saves.
 func isMetadataEntry(p string) bool {
 	if strings.HasPrefix(p, "__MACOSX/") || p == "__MACOSX" {
 		return true
@@ -322,87 +379,84 @@ func topLevelComponent(p string) string {
 	return p
 }
 
-// extractZip pulls path entries out of zipPath into destDir, returning the
-// single top-level directory name plus counts. Errors include zip-bomb and
-// path-traversal failures.
-func extractZip(zipPath, destDir string) (string, int, int64, error) {
+// extractZip pulls path entries out of zipPath into destDir, returning all
+// top-level directory names plus counts. Unlike the previous version it allows
+// multiple top-level entries — layout validation is the caller's job.
+func extractZip(zipPath, destDir string) ([]string, int, int64, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("not a valid zip: %w", err)
+		return nil, 0, 0, fmt.Errorf("not a valid zip: %w", err)
 	}
 	defer zr.Close()
 
 	var (
-		topLevel  string
-		fileCount int
-		byteCount int64
+		topLevelSet = map[string]struct{}{}
+		fileCount   int
+		byteCount   int64
 	)
 	for _, f := range zr.File {
 		clean, err := validateEntryName(f.Name)
 		if err != nil {
-			return "", 0, 0, err
+			return nil, 0, 0, err
 		}
 		// Skip pure directory entries that resolve to "." after cleaning.
 		if clean == "." || clean == "" {
 			continue
 		}
 		// Skip macOS Finder noise so a zip that was built on a Mac doesn't
-		// trip the "multiple top-level entries" check below.
+		// trip validation checks.
 		if isMetadataEntry(clean) {
 			continue
 		}
-		root := topLevelComponent(clean)
-		if topLevel == "" {
-			topLevel = root
-		} else if root != topLevel {
-			return "", 0, 0, fmt.Errorf("archive has multiple top-level entries (%q and %q); expected one region folder", topLevel, root)
-		}
+		topLevelSet[topLevelComponent(clean)] = struct{}{}
 
 		full := filepath.Join(destDir, filepath.FromSlash(clean))
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(full, 0o700); err != nil {
-				return "", 0, 0, err
+				return nil, 0, 0, err
 			}
 			continue
 		}
 		// Symlinks etc. — DF saves are plain files; reject anything else.
 		if !f.FileInfo().Mode().IsRegular() {
-			return "", 0, 0, fmt.Errorf("unsupported entry type for %q", clean)
+			return nil, 0, 0, fmt.Errorf("unsupported entry type for %q", clean)
 		}
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-			return "", 0, 0, err
+			return nil, 0, 0, err
 		}
 		written, err := writeLimited(f.Open, full, maxImportExtractBytes-byteCount)
 		if err != nil {
-			return "", 0, 0, err
+			return nil, 0, 0, err
 		}
 		byteCount += written
 		fileCount++
 	}
-	if topLevel == "" {
-		return "", 0, 0, errors.New("archive is empty")
+	if len(topLevelSet) == 0 {
+		return nil, 0, 0, errors.New("archive is empty")
 	}
-	return topLevel, fileCount, byteCount, nil
+	topLevels := sortedKeys(topLevelSet)
+	return topLevels, fileCount, byteCount, nil
 }
 
-// extractTarGz pulls entries out of a gzip+tar archive into destDir.
-func extractTarGz(tgzPath, destDir string) (string, int, int64, error) {
+// extractTarGz pulls entries out of a gzip+tar archive into destDir, returning
+// all top-level directory names plus counts.
+func extractTarGz(tgzPath, destDir string) ([]string, int, int64, error) {
 	f, err := os.Open(tgzPath)
 	if err != nil {
-		return "", 0, 0, err
+		return nil, 0, 0, err
 	}
 	defer f.Close()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("not a valid gzip: %w", err)
+		return nil, 0, 0, fmt.Errorf("not a valid gzip: %w", err)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 
 	var (
-		topLevel  string
-		fileCount int
-		byteCount int64
+		topLevelSet = map[string]struct{}{}
+		fileCount   int
+		byteCount   int64
 	)
 	for {
 		hdr, err := tr.Next()
@@ -410,7 +464,7 @@ func extractTarGz(tgzPath, destDir string) (string, int, int64, error) {
 			break
 		}
 		if err != nil {
-			return "", 0, 0, fmt.Errorf("malformed tar: %w", err)
+			return nil, 0, 0, fmt.Errorf("malformed tar: %w", err)
 		}
 		// PAX/GNU metadata records carry no file data we want; the headers
 		// they describe will appear as the next entry. Skip without
@@ -421,7 +475,7 @@ func extractTarGz(tgzPath, destDir string) (string, int, int64, error) {
 		}
 		clean, err := validateEntryName(hdr.Name)
 		if err != nil {
-			return "", 0, 0, err
+			return nil, 0, 0, err
 		}
 		if clean == "." || clean == "" {
 			continue
@@ -429,36 +483,42 @@ func extractTarGz(tgzPath, destDir string) (string, int, int64, error) {
 		if isMetadataEntry(clean) {
 			continue
 		}
-		root := topLevelComponent(clean)
-		if topLevel == "" {
-			topLevel = root
-		} else if root != topLevel {
-			return "", 0, 0, fmt.Errorf("archive has multiple top-level entries (%q and %q); expected one region folder", topLevel, root)
-		}
+		topLevelSet[topLevelComponent(clean)] = struct{}{}
 		full := filepath.Join(destDir, filepath.FromSlash(clean))
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(full, 0o700); err != nil {
-				return "", 0, 0, err
+				return nil, 0, 0, err
 			}
 		case tar.TypeReg, tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-				return "", 0, 0, err
+				return nil, 0, 0, err
 			}
 			written, err := writeLimitedReader(tr, full, maxImportExtractBytes-byteCount)
 			if err != nil {
-				return "", 0, 0, err
+				return nil, 0, 0, err
 			}
 			byteCount += written
 			fileCount++
 		default:
-			return "", 0, 0, fmt.Errorf("unsupported tar entry type %c for %q", hdr.Typeflag, clean)
+			return nil, 0, 0, fmt.Errorf("unsupported tar entry type %c for %q", hdr.Typeflag, clean)
 		}
 	}
-	if topLevel == "" {
-		return "", 0, 0, errors.New("archive is empty")
+	if len(topLevelSet) == 0 {
+		return nil, 0, 0, errors.New("archive is empty")
 	}
-	return topLevel, fileCount, byteCount, nil
+	topLevels := sortedKeys(topLevelSet)
+	return topLevels, fileCount, byteCount, nil
+}
+
+// sortedKeys returns the keys of a map[string]struct{} in sorted order.
+func sortedKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // writeLimited opens a fresh reader via opener and copies up to limit bytes
@@ -500,7 +560,7 @@ func writeLimitedReader(r io.Reader, dst string, limit int64) (int64, error) {
 }
 
 // hasRegionFiles checks that the directory contains both world.dat and
-// world.sav, the two files DF Premium writes for every region.
+// world.sav, the two files DF Premium writes for the base region folder.
 func hasRegionFiles(dir string) bool {
 	for _, name := range []string{"world.dat", "world.sav"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
@@ -508,6 +568,32 @@ func hasRegionFiles(dir string) bool {
 		}
 	}
 	return true
+}
+
+// hasSaveFile checks that the directory contains world.sav (present in all DF
+// save folders: region dirs, savegame, autosaves, current).
+func hasSaveFile(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "world.sav"))
+	return err == nil
+}
+
+// dfSaveDirsIn returns the names of immediate subdirectories of dir that
+// contain a world.sav file (i.e. look like DF save folders).
+func dfSaveDirsIn(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var result []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if hasSaveFile(filepath.Join(dir, e.Name())) {
+			result = append(result, e.Name())
+		}
+	}
+	return result, nil
 }
 
 // nextFreeRegion returns the lowest regionN that doesn't already exist under
