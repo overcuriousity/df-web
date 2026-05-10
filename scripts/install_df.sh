@@ -9,7 +9,7 @@
 #   DF_VERSION=50_11   override default version without interactive prompt
 # ==============================================================================
 
-set -uo pipefail
+set -euo pipefail
 
 # --- Colors ---
 RED='\e[1;31m'; GREEN='\e[1;32m'; YELLOW='\e[1;33m'; BLUE='\e[1;34m'; NC='\e[0m'
@@ -319,8 +319,9 @@ WRAPPER="$BIN_DIR/dwarf-fortress"
 log "Creating launcher at $WRAPPER..."
 cat > "$WRAPPER" <<WRAPPER_SCRIPT
 #!/usr/bin/env bash
+cd "$INSTALL_DIR"
 exec env LD_LIBRARY_PATH="$INSTALL_DIR\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" \
-    "$INSTALL_DIR/$DF_BINARY" "\$@"
+    "./$DF_BINARY" "\$@"
 WRAPPER_SCRIPT
 chmod +x "$WRAPPER"
 ok "Launcher created."
