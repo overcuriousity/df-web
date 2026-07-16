@@ -38,7 +38,7 @@ Download the Linux classic build from [bay12games.com](https://www.bay12games.co
 
 ```bash
 mkdir -p df-image-base/df
-tar -xjf df_53.12_linux.tar.bz2 -C df-image-base/df --strip-components=1
+tar -xjf df_53_15_linux.tar.bz2 -C df-image-base/df --strip-components=1
 ```
 
 `tar -C` does not auto-create the destination, so the `mkdir` is required on a fresh clone. `df-image-base/df/` must end up containing `dwarfort`, `data/`, `raw/`, etc.
@@ -92,7 +92,7 @@ docker build -t df-image-sdl  ./df-image-sdl
 **With DFHack** (optional — enables the in-game `manipulator` and unlocks the `/therapist` page):
 ```bash
 docker build -t df-image-base ./df-image-base
-docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.12-r1 ./df-image-sdl
+docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.15-r2 ./df-image-sdl
 ```
 
 Then set `dfhack_enabled: true` in `session-manager/config.yml`.
@@ -128,7 +128,7 @@ docker build -t df-image-base ./df-image-base
 
 # Only if df-image-sdl/ changed (Dockerfile, s6/, hack/scripts/, dfhack-config/, …).
 # Use the --build-arg you used at install time, or drop it for vanilla.
-docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.12-r1 ./df-image-sdl
+docker build -t df-image-sdl --build-arg DFHACK_VERSION=53.15-r2 ./df-image-sdl
 ```
 
 Use `--no-cache` whenever Dockerfiles change (including base image layers). Running the old image after a fix to image-layer behaviour (e.g. save directory wiring or DFHack scripts) will silently keep the bug active.

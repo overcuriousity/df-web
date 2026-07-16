@@ -15,8 +15,9 @@ import (
 
 // handleOIDC routes /auth/oidc/* requests.
 // Routes:
-//   GET /auth/oidc/login    → redirect to Nextcloud authorization endpoint
-//   GET /auth/oidc/callback → handle code exchange, set session
+//
+//	GET /auth/oidc/login    → redirect to Nextcloud authorization endpoint
+//	GET /auth/oidc/callback → handle code exchange, set session
 func (m *Manager) handleOIDC(w http.ResponseWriter, r *http.Request) {
 	if m.cfg.OIDCIssuer == "" {
 		http.Error(w, "OIDC not configured", http.StatusNotFound)

@@ -15,12 +15,6 @@ import (
 const cookieName = "dfsess"
 const cookieTTL = 7 * 24 * time.Hour
 
-// sessionPayload is stored in the cookie as base64(uid:issued:hmac).
-type sessionPayload struct {
-	UID    string
-	Issued time.Time
-}
-
 func (m *Manager) setSession(w http.ResponseWriter, uid string) {
 	raw := uid + "|" + time.Now().UTC().Format(time.RFC3339)
 	sig := m.sign(raw)

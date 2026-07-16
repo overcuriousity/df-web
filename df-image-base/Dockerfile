@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Place the contents of the DF tarball in df-image-base/df/ before building:
 #
 #   mkdir df-image-base/df
-#   tar -xjf df_53.12_linux.tar.bz2 -C df-image-base/df --strip-components=1
+#   tar -xjf df_53_15_linux.tar.bz2 -C df-image-base/df --strip-components=1
 #
 # df-image-base/df/ should contain: dwarfort, data/, raw/, etc.
 COPY df/ /opt/df/

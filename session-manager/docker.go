@@ -24,18 +24,19 @@ func containerRuntime() string {
 }
 
 // Per-user host layout (under cfg.SavesRoot/<uid>/):
-//   data/       → bind-mounted onto $HOME/.local/share/Bay 12 Games/Dwarf Fortress
-//                 inside the container. DF writes saves here in normal (XDG) mode.
-//   data/save/  → also bind-mounted onto /opt/df/data/save inside the container.
-//                 DF writes saves here when the user accidentally enables portable
-//                 mode in the in-game settings. Both mounts resolve to the same
-//                 host directory so saves persist regardless of which mode is active.
-//   config/     → bind-mounted onto $HOME/.config/Bay 12 Games/Dwarf Fortress.
-//                 DF writes user-modified init/keybinding files here.
+//
+//	data/       → bind-mounted onto $HOME/.local/share/Bay 12 Games/Dwarf Fortress
+//	              inside the container. DF writes saves here in normal (XDG) mode.
+//	data/save/  → also bind-mounted onto /opt/df/data/save inside the container.
+//	              DF writes saves here when the user accidentally enables portable
+//	              mode in the in-game settings. Both mounts resolve to the same
+//	              host directory so saves persist regardless of which mode is active.
+//	config/     → bind-mounted onto $HOME/.config/Bay 12 Games/Dwarf Fortress.
+//	              DF writes user-modified init/keybinding files here.
 const (
-	containerDataDir        = "/root/.local/share/Bay 12 Games/Dwarf Fortress"
-	containerConfigDir      = "/root/.config/Bay 12 Games/Dwarf Fortress"
-	containerTilesetsDir    = "/opt/df/user-tilesets"
+	containerDataDir         = "/root/.local/share/Bay 12 Games/Dwarf Fortress"
+	containerConfigDir       = "/root/.config/Bay 12 Games/Dwarf Fortress"
+	containerTilesetsDir     = "/opt/df/user-tilesets"
 	containerPortableSaveDir = "/opt/df/data/save"
 )
 

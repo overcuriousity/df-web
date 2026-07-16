@@ -8,24 +8,24 @@ import (
 )
 
 type Config struct {
-	Listen      string        `yaml:"listen"`
-	WebDir      string        `yaml:"web_dir"`
-	NoVNCDir    string        `yaml:"novnc_dir"`   // e.g. /usr/share/novnc
-	SavesRoot   string        `yaml:"saves_root"`     // /srv/df/users
-	ImageSDL    string        `yaml:"image_sdl"`      // df-image-sdl
-	Network     string        `yaml:"docker_network"` // df_internal
-	IdleTimeout time.Duration `yaml:"idle_timeout"`   // 30m
-	MaxSessions int           `yaml:"max_sessions"`   // 5
-	CookieKey   string        `yaml:"cookie_key"`     // 32+ random bytes (hex)
-	OIDCIssuer  string        `yaml:"oidc_issuer"`    // https://nextcloud.example.com
-	OIDCClient  string        `yaml:"oidc_client_id"`
-	OIDCSecret  string        `yaml:"oidc_client_secret"`
-	OIDCRedirect string       `yaml:"oidc_redirect_uri"`
-	RPOrigins   []string      `yaml:"rp_origins"`     // WebAuthn relying party origins
-	RPID        string        `yaml:"rp_id"`          // WebAuthn relying party ID (hostname)
-	RPName         string `yaml:"rp_display_name"`
-	InsecureCookie bool   `yaml:"insecure_cookie"` // set true for HTTP-only local dev
-	DFHackEnabled  bool   `yaml:"dfhack_enabled"`  // set true when df-image-sdl is built with DFHack
+	Listen         string        `yaml:"listen"`
+	WebDir         string        `yaml:"web_dir"`
+	NoVNCDir       string        `yaml:"novnc_dir"`      // e.g. /usr/share/novnc
+	SavesRoot      string        `yaml:"saves_root"`     // /srv/df/users
+	ImageSDL       string        `yaml:"image_sdl"`      // df-image-sdl
+	Network        string        `yaml:"docker_network"` // df_internal
+	IdleTimeout    time.Duration `yaml:"idle_timeout"`   // 30m
+	MaxSessions    int           `yaml:"max_sessions"`   // 5
+	CookieKey      string        `yaml:"cookie_key"`     // 32+ random bytes (hex)
+	OIDCIssuer     string        `yaml:"oidc_issuer"`    // https://nextcloud.example.com
+	OIDCClient     string        `yaml:"oidc_client_id"`
+	OIDCSecret     string        `yaml:"oidc_client_secret"`
+	OIDCRedirect   string        `yaml:"oidc_redirect_uri"`
+	RPOrigins      []string      `yaml:"rp_origins"` // WebAuthn relying party origins
+	RPID           string        `yaml:"rp_id"`      // WebAuthn relying party ID (hostname)
+	RPName         string        `yaml:"rp_display_name"`
+	InsecureCookie bool          `yaml:"insecure_cookie"` // set true for HTTP-only local dev
+	DFHackEnabled  bool          `yaml:"dfhack_enabled"`  // set true when df-image-sdl is built with DFHack
 }
 
 func loadConfig(path string) (*Config, error) {

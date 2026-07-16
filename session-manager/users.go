@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 
-	sqlite "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
+	sqlite "modernc.org/sqlite"
 )
 
 // ErrUserExists is returned by CreateUser when the uid is already taken.
@@ -32,14 +32,14 @@ type PasskeyCredential struct {
 }
 
 type User struct {
-	UID           string             `yaml:"uid"`
-	DisplayName   string             `yaml:"display_name"`
-	TokenHash     string             `yaml:"token_hash"`
-	OIDCSub       string             `yaml:"oidc_sub"`
+	UID           string              `yaml:"uid"`
+	DisplayName   string              `yaml:"display_name"`
+	TokenHash     string              `yaml:"token_hash"`
+	OIDCSub       string              `yaml:"oidc_sub"`
 	Passkeys      []PasskeyCredential `yaml:"passkeys"`
-	DefaultMode   string             `yaml:"default_mode"`
-	ActiveTileset string             `yaml:"active_tileset,omitempty"`
-	IsAdmin       bool               `yaml:"is_admin,omitempty"`
+	DefaultMode   string              `yaml:"default_mode"`
+	ActiveTileset string              `yaml:"active_tileset,omitempty"`
+	IsAdmin       bool                `yaml:"is_admin,omitempty"`
 }
 
 type UserStore struct {

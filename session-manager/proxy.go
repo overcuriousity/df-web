@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -17,7 +18,7 @@ func proxyHTTPStream(w http.ResponseWriter, r *http.Request, host string, port i
 		http.Error(w, "audio not ready", http.StatusGatewayTimeout)
 		return
 	}
-	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", host, port)}
+	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port))}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1 // stream each write immediately
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -42,7 +43,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string, port in
 
 	target := &url.URL{
 		Scheme: "http",
-		Host:   fmt.Sprintf("%s:%d", host, port),
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -54,7 +55,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string, port in
 
 func waitPort(host string, port int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err == nil {

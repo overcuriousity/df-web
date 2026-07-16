@@ -15,7 +15,7 @@ type dfUser struct {
 	user *User
 }
 
-func (u *dfUser) WebAuthnID() []byte         { return []byte(u.user.UID) }
+func (u *dfUser) WebAuthnID() []byte          { return []byte(u.user.UID) }
 func (u *dfUser) WebAuthnName() string        { return u.user.UID }
 func (u *dfUser) WebAuthnDisplayName() string { return u.user.DisplayName }
 func (u *dfUser) WebAuthnIcon() string        { return "" }

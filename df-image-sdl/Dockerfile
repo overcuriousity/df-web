@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Optional: install DFHack. Set DFHACK_VERSION at build time to enable.
 # DFHack is not included in this repository and is not required; leaving this
 # arg empty produces a vanilla DF image. When set, the value must match the
-# installed DF version exactly (e.g. 53.12-r1).
+# installed DF version exactly (e.g. 53.15-r2).
 # DFHack is copyright its respective contributors; see https://github.com/DFHack/dfhack
 ARG DFHACK_VERSION=""
 RUN if [ -n "${DFHACK_VERSION}" ]; then \

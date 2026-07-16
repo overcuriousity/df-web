@@ -7,7 +7,7 @@ until [ -S /tmp/pulse/native ]; do sleep 0.2; done
 export DISPLAY=:0
 export PULSE_SERVER=unix:/tmp/pulse/native
 export SDL_AUDIODRIVER=pulse
-cd /opt/df
+cd /opt/df || exit 1
 
 # Apply user-uploaded tilesets and selection. Non-fatal on error.
 /apply-tilesets.sh || true

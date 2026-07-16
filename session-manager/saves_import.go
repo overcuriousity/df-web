@@ -441,7 +441,7 @@ func extractTarGz(tgzPath, destDir string) (fileCount int, byteCount int64, err 
 			if err := os.MkdirAll(full, 0o700); err != nil {
 				return 0, 0, err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 				return 0, 0, err
 			}

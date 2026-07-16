@@ -214,7 +214,7 @@ echo "======================================================="
 echo ""
 
 # --- Version ---
-DEFAULT_VER="${DF_VERSION:-53_12}"
+DEFAULT_VER="${DF_VERSION:-53_15}"
 while true; do
     ask DF_VER "DF version (e.g., 50_11)" "$DEFAULT_VER"
     [[ "$DF_VER" =~ ^[0-9]+_[0-9]+$ ]] && break
