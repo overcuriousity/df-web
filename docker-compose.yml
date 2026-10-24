@@ -6,7 +6,7 @@ services:
     build: ./session-manager
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro  # needed to spawn game containers
       - /srv/df/users:/srv/df/users                   # per-user data/ + config/ live here

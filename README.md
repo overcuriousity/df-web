@@ -38,7 +38,7 @@ Download the Linux classic build from [bay12games.com](https://www.bay12games.co
 
 ```bash
 mkdir -p df-image-base/df
-tar -xjf df_53_15_linux.tar.bz2 -C df-image-base/df --strip-components=1
+tar -xjf df_53_15_linux.tar.bz2 -C df-image-base/df
 ```
 
 `tar -C` does not auto-create the destination, so the `mkdir` is required on a fresh clone. `df-image-base/df/` must end up containing `dwarfort`, `data/`, `raw/`, etc.

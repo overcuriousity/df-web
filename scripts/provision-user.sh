@@ -69,6 +69,10 @@ USERS_DB="$SCRIPT_DIR/../session-manager/users.db"
 # the host, which prevents SQLite from opening the file.
 touch "$USERS_DB"
 
+# make sure that the table is created, otherwise sqlite will abort.
+# also make sure, that existing tables don't get overwritten
+sqlite3 "$USERS_DB" "CREATE TABLE IF NOT EXISTS users(uid, display_name, token_hash, oidc_sub, is_admin, active_tileset, default_mode)"
+
 # Escape a string for safe use in a SQLite single-quoted literal.
 sql_escape() {
     printf "%s" "$1" | sed "s/'/''/g"
